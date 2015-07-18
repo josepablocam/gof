@@ -1,0 +1,280 @@
+---
+title: "Continuous Distribution Goodness-of-Fit in MLlib"
+author: "Jose Cambronero"
+header-includes:
+  - \usepackage{tikz}
+output: pdf_document
+---
+
+#Data's portrait
+Data can come in many shapes and forms, with an equally large amount of ways to describe them.
+Most people have dealt with averages and standard deviation. These are in effect *shorthand*
+for that description. Sometimes we might want more information, more perspective into that
+data's profile. In a situation like that we might look at other measures, such as [skewness](https://en.wikipedia.org/wiki/Skewness) and [kurtosis](https://en.wikipedia.org/wiki/Kurtosis). However, sometimes we can provide a much neater description
+for data by stating it comes from a given distribution, which not only tells us things
+like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of neat information from it. 
+
+Armed with this information we can go out in the world and try our hand at many tasks: we can
+perform anomaly detection by analyzing the likelihood of any new values under that distribution; we can seek to better understand natural phenomena by analyzing their statistical properties; we can validate our modeling logic and improve our ability to model processes; the opportunities are endless.
+
+#Innocent until proven guilty (read: null until proven alternate!)
+We might have various distributions that we think fit our data. For example, we might have just fit a linear regression to a dataset, and believe that our residuals are white noise (i.e. standard normal), and we would now like some assurance that this is the case and we're not missing some important features in our model. Or we might have measured the wait time for the 6 train in NYC at the City Hall stop (protip: it's forever...just come to terms with that) and we'd like to model this using an exponential distribution. We now have the task of testing whether our empirical data actually follow these theoretical distributions.
+
+It is often difficult to conclude that a given hypothesis is correct. However, the converse, concluding that a given hypothesis is wrong, is actually much simpler. This idea might initially seem a bit counterintuitive, but a simple example can clear things up. Let's say a bad back is a common (clearly not professional!) diagnosis for back pain. If I have back pain, it is possible that I might have a bad back. It is also possible that I simply sat for too long. However, if I don't have back pain, it is fairly certain that I don't have a bad back. This drives the underlying intuition behind the concept of a null hypothesis and statistical tests for that hypothesis.
+
+We can use this hammer and nail, a statistic and a hypothesis test, to do something similar with our potential distributions. In fact, there are various standard statistical tests that allow us to analyze whether a given sample might come from a given theoretical distribution (or alternatively, whether 2 samples come from the same, unknown, distribution). We'll discuss 2 of these in depth in this blog post: the Kolmogorov-Smirnov test, and the Anderson-Darling test. While "passing" the test doesn't guarantee that the data comes from that distribution, failing it is a pretty surefire way to demonstrate that it does not.
+
+#Statistics: Goodness-of-Fit tests
+##Kolmogorov-Smirnov
+This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The intuition behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the empirical cumulative distribution.
+
+The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
+$$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $lZ$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
+
+The general intuition is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
+
+```{r, echo=FALSE, smallplot}
+### Demonstrating KS stat intuition
+library(ggplot2)
+n <- 100
+dataSample <- sort(rnorm(n))
+ecdf <- seq_along(dataSample) / n
+cdf <- sapply(dataSample, function(x) pnorm(x, mean = 1.3))
+dists <- abs(ecdf - cdf) #roughly..note that real KS is not symmetric
+maxDist <- max(dists)
+maxIx <- which(dists == maxDist)
+
+qplot(x = dataSample, y = ecdf, geom = "line", color = "ECDF") +
+  geom_line(aes(y = cdf, color = "CDF")) +
+  geom_segment(aes(x = dataSample[maxIx], xend = dataSample[maxIx],
+                   y = ecdf[maxIx], yend = cdf[maxIx],
+                   color = "distance"), linetype = "dashed"
+                   ) +
+  labs(y = "Cumulative Probability", x = "X", color = "")
+  
+```
+
+
+One of the main appeals of this test centers around the fact that the test is distribution-agnostic. By that we mean that the statistic can be calculated and compared the same way regardless of the theoretical distribution we are interested in comparing against (or the actual distributions of the 1 or 2 samples, depending on the test variant being performed).
+
+##Anderson-Darling
+Anderson-Darling is often proposed as an alternative to the Kolmogorov-Smirnov statistic, with the advantage that it is better suited to identify departures from the theoretical distribution at the tails, and is more robust towards the nuances associated with estimating the distribution's parameters directly from the sample that we're trying to test.
+
+In contrast to the Kolmogorov-Smirnov test, the Anderson-Darling test for 1-sample has critical values (i.e. the reference points that we will use to accept or dismiss our null hypothesis) that depend on the distribution we are testing against.
+
+The informal intuition behind Anderson-Darling is that *not all distances are equal*, meaning, that a deviation of size $m$ between the empirical CDF curve and the CDF curve should carry different importance depending on where it happens. Indeed, a small deviation at the start of the CDF or the end could signal that the sample doesn't really stem from that distribution. Why is that? Well, consider that the CDF tends to 0 at the left, and 1 at the right, so there **shouldn't** be any real discrepancies there, for the most part.
+
+Specifically, the Anderson-Darling test weighs the square of the deviations by $\frac{1}{\Phi(x)(1-\Phi(x))}$, where $\Phi$ is once again the CDF.
+
+The graph below shows the point we made earlier, departures at the tails are weighed more heavily, and contribute to the overall sum, even if they're nominally small.
+
+```{r, echo=FALSE}
+### Demonstrating weight function in Anderson-Darling
+left <- seq(0, 1, 0.05)
+right <- 1 - left
+weight <- 1 / (left * right)
+qplot(x = left, y = weight, geom="line") + labs(x = expression(Phi(x)), y = "weight")
+```
+
+Let's take a look at the formula definition of Anderson-Darling (for brevity sake, we will solely consider the computational formula, not the formal version which involves an integral from $-\infty$ to $\infty$).
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Phi(Z_{n+1-i}))]$$
+
+
+#Implementations
+##Distilling distributed distribution (statistics) (now say that three times fast...)
+Calculating both of these statistics is extremely straightforward when performed in memory. If we have all our data, we can simply traverse it as needed and calculate what we need at each point. Performing the same calculations in a distributed setting can take a bit more craftiness.
+
+Cloudera has contributed distributed implementations of these tests to MLlib. You can now find in the Statistics object: the 1-sample, 2-sided Kolmogorov-Smirnov test; the 2-sample, 2-sided, Kolmogorov-Smirnov test; the 1-sample Anderson-Darling test; and the k-sample Anderson-Darling test.
+
+The remainder of this blog focuses on explaining the implementation details, along with some use-case examples for 2 of these tests: the 2-sample Kolmogorov-Smirnov test, and the 1-sample Anderson-Darling test. We've chosen these two as they arguably provide the most interesting implementations.
+
+### Locals and Globals
+The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the graph below. We could keep track of the last seen maximum as we traverse the graph from left to right. But, if the graph were divided into parts, we could just as easily simply take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
+
+```{r, echo=FALSE}
+set.seed(1)
+x <- seq(100)
+y <- rnorm(100) + rnorm(100)*rbinom(100, 1, 0.3) #add spikes to N(0,1) with prob 0.3
+isBoundary <- x %% 10 == 0 # part every 10 and
+adjx <- x + runif(1)*isBoundary # move points along x a bit if at boundary
+partIds <- 1 + cumsum(isBoundary)  #give them an id
+localMaxCoords <- data.frame(y = tapply(y, partIds, max)) #max in each partition
+localMaxCoords$x <- adjx[which(y == localMaxCoords$y[partIds])] #index of the max in each
+globalMaxCoords <- data.frame(x = adjx[which(y == max(y))], y = max(y))
+
+qplot(adjx, y, geom = "point") + #main plot
+  geom_vline(xintercept = which(isBoundary), linetype = "longdash", color = "pink") +
+  geom_point(data = localMaxCoords, aes(x = x, y = y, color = "local max"),
+               shape = 1, size = 4, fill = NA) +
+  geom_point(data = globalMaxCoords, aes(x = x, y = y, color = "global max"),
+            shape = 1, size = 8, fill = NA) +
+  labs(x="",y="", color ="")
+```
+
+
+###2-sample Kolmogorov-Smirnov test
+The 2-sample variant of the KS test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the number of elements in $Z$. This in effect is the CDF curve for $Z$ assuming we view sample 1 and sample 2 as some sort of *step-wise theoretical CDFs*. It makes sense then, that we could in turn compare these curves to test whether the 2 CDFs (and thus the distributions) are the same.
+
+Implementing this in-memory is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. We are going to have to combine the data and sort it to create $Z$. There is no way for us to get around that. Once we have that, however, we'd like to minimize the amount of unnecessary shuffles (recall, this requires writing out data to disk, which is expensive) and jobs (which isn't quite a shuffle, but still consumes resources).
+
+If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of 1 sample. The 2-sample case is analogous.
+
+```{r, echo=FALSE, warning=FALSE}
+set.seed(1)
+data <- sort(rnorm(100))
+cdfVals <- sapply(data, pnorm)
+partBoundariesIx <- c(24, 45)
+partBoundaries <- data[partBoundariesIx]
+localIx <- seq(partBoundariesIx[1], partBoundariesIx[2])
+xLocal <- data[localIx]
+yLocal <- cdfVals[localIx] - cdfVals[localIx][1] #shifted down by first
+ribbonCoords <- data.frame(x = rep(0, 100), ymin = rep(0, 100), ymax = rep(0, 100))
+ribbonCoords$x[localIx] <- xLocal
+ribbonCoords$ymin[localIx] <- yLocal
+ribbonCoords$ymax[localIx] <- cdfVals[localIx]
+
+qplot(x = data, y = cdfVals) + 
+  geom_point(aes(x = xLocal, y = yLocal, color = "local")) + 
+  geom_ribbon(data = ribbonCoords, aes(x = x, ymin = ymin, ymax = ymax, 
+                                       fill = "distance"), alpha = 0.25) +
+  labs(x = "x", y = expression(Phi(x)), color = "", fill = "") +
+  scale_fill_manual(values = c(3), labels = c(expression(alpha)))  
+```
+
+This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the approproriate constant ($a$ is really $a_i$ for each partition $i$, similarly for $b$), and then comparing the results for the maximum.
+
+The general strategy will aid us well in other implementations and the gist of it can be summarized as: calculate as much as you can within each partition and communicate as little as you can so that you can adjust at then end. So in the case of the 2 sample KS test we want each partition to compute 
+
+- The maximum and minimum distance between the local empirical CDFs
+- The count of elements in sample 1
+- The count of elements in sample 2
+
+We actually combine the last 2 points into 1 adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
+
+
+\def\layersep{2.5cm}
+\usetikzlibrary{fit}
+\begin{tikzpicture}[shorten >=1pt,->,draw=black!50, node distance=\layersep]
+    \tikzstyle{every pin edge}=[<-,shorten <=1pt]
+    \tikzstyle{sparkNode}=[circle,fill=black!25,minimum size=17pt,inner sep=0pt]
+    \tikzstyle{partition}=[sparkNode, fill=red!50];
+    \tikzstyle{local}=[sparkNode, fill=yellow!50];
+    \tikzstyle{result}=[sparkNode, fill=green!50];
+    \tikzstyle{annot} = [text width=4em, text centered]
+
+    % Draw the partition layer nodes
+    \foreach \name / \y in {1,...,3}
+        \node[partition, pin=left:\#\y] (P-\name) at (0,-\y) {};
+    \node[partition, pin=left:...](P-ellipsis) at (0, -4){};
+
+    % Draw the driver layer nodes
+    \foreach \name / \y in {1, ..., 3}
+            \node[local] (L-\name) at (\layersep,-\y) {};
+    \node[local](L-ellipsis) at (\layersep, -4){};
+    
+    
+    % Draw arrows between local layer nodes
+    \path (L-1) edge[bend left] node[font=\tiny, right] {adj. constant} (L-2);
+    \path (L-2) edge[bend left] (L-3);
+    \path (L-3) edge[bend left] (L-ellipsis);
+    
+    %\node[driver,pin={[pin edge={->}]right:Output}, right of=P-3] (D) {};
+
+    % Connect every node in the input layer with the local node
+    \foreach \source in {1,...,3}
+            \path (P-\source) edge (L-\source);
+    \path (P-ellipsis) edge node[font=\tiny, above]{(min,max, $adj_i$)}(L-ellipsis);
+    
+    %Draw box around local nodes
+    \node[draw,red, dotted,fit=(L-1) (L-2) (L-3) (L-ellipsis)] {};
+    
+    %Create result node
+    \node[result] (Result) at (2 * \layersep, -3){};
+    
+    %Connect each local node with result
+    \path (L-1) edge node[font=\tiny, right] {adjusted max/min} (Result);
+    \path (L-2) edge (Result); 
+    \path (L-3) edge (Result);
+    \path (L-ellipsis) edge (Result);
+    
+    % Annotate the layers
+    \node[annot,above of=P-1, node distance=1cm]  (partsAnnot) {Partitions};
+    \node[annot,right of=partsAnnot] {Driver};
+    \node[annot,above of=Result]{Result};
+\end{tikzpicture}
+
+ 
+ 
+
+TODO: add an example here.
+
+
+Note that the test is meant for continuous distributions, so any ties in ranking will affect the test's power.
+
+
+###1-sample Anderson-Darling test
+The implementation of the 1-sample Anderson-Darling test provides yet another productive strategy: algebraic transformations that isolate global vs local components can be useful in maximizing how much we can calculate locally and how much information we need to carry to adjust globally later. The Anderson-Darling statistic is frequently formulated as shown below:
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Phi(Z_{n+1-i}))]$$
+
+By having a term that involved $Z_i$ and $Z_{n+1-i}$, this requires that we have access to elements that may or may not be in the same partition. But we can clearly reformulate this in a way that every term in the statistic solely deals with $Z_i$, thus getting around this issue. We can re-index the second terms so that the sum is based on element $i$, rather than $n+1-i$. The final form of the statistic is then:
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) \ln( \Phi( Z_i )  + (2(n -i) + 1)\ln (1 - \Phi(Z_{i}))]$$
+
+
+For our example, we'll test how well an exponential distribution fits the waiting time between arrivals of the NYC 6 Subway train (downtown bound) at different stops. Such a test might be a natural first line of attack for someone looking to model delays in the subway. For example, if the tests tell us that an exponential distribution cannot be ruled out, then we might decide to use the exponential's CDF to identify inordinately long times, and warn users about potential issues on the track.
+
+We'll be using the May 2011 [MTA ATS data](http://web.mta.info/developers/data/nyct/historic/A%20Division%20Historical%20Data%20Documentation.txt). The files are available as csv downloads, with each row providing: the date, train identifier, direction of the train, timestamp of the event, the type of event (arrival or departure), route identifier, stop identifier, and track identifier. 
+
+We'll gloss over the parsing of the data here, but you can see the full code at ADDLINK.
+
+```
+object AndersonDarlingMTA {
+  def main(a: Array[String]): Unit = {
+    val sc = new SparkContext("local", "test")
+    // TODO: replace with hdfs path in cluster
+    val path = "/Users/josecambronero/Projects/gof/data/mta_may_2011"
+    val mtaRaw = sc.textFile(path).sample(false, 0.3, 3L) // just a sample for now, since local
+    val parsed = mtaRaw.map(x => Try(parseTrainEvent(x))).filter(_.isSuccess).map(_.get)
+    // my train: 6, downtown, arrival times :)
+    val train6Down= parsed.filter { x =>
+      x.train == 6 && x.dir == 1 && x.eventType == 1
+    }.sortBy(_.timestamp) // go ahead and sort now
+
+
+    val stops = train6Down.map(_.stop).distinct
+    val results = stops.map { stop =>
+      val stopData = train6Down.filter(_.stop == stop).map(_.timestamp)
+      // to calculate time span between arrivals we need to process elements sequentially
+      // (to some extent). To take advantage of spark, we want to parallelize though
+      // so the compromise is: processes partitions in parallel, and operate sequentially
+      // within each partition. This means that we need to drop 1 span per partition (the first
+      // one), and we drop any observations that are alone in a partition.
+      val waitingTimes = stopData.mapPartitions { part =>
+        val local = part.toArray
+        local.zip(local.drop(1)).map { case (pt, t) =>
+          (t.getMillis - pt.getMillis).toDouble / 6e4
+        }.iterator
+      }.filter(_ > 0)
+      // We estimate the MLE for exponential (i.e. the mean of the data)
+      val expDist = new ExponentialDistribution(waitingTimes.mean())
+      // Just using KS as a place holder, this should be AD, since it is robust
+      // against estimating parameters from the data that we're testing
+      val result = Statistics.kolmogorovSmirnovTest(
+        waitingTimes,
+        (span: Double) => expDist.cumulativeProbability(span)
+        )
+      (stop, result)
+    }
+  }
+
+
+```
+
+
+
+
+While in this blog post we have used the Scala API, all these tests have also been made available in PySpark, allowing data scientists to calculate familiar statistics on big-data sized samples. As usual, all feedback is welcome. Happy hypothesis-testing!
+
+		
