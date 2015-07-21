@@ -222,7 +222,7 @@ object KolmogorovSmirnovOLS {
 
   def main(args: Array[String]): Unit = {
 
-    val n = 1e2.toLong
+    val n = 1e6.toLong
     val x1 = normalRDD(sc, n, seed = 10L)
     val x2 = normalRDD(sc, n, seed = 5L)
     val X = x1.zip(x2)
