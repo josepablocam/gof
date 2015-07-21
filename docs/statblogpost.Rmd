@@ -204,10 +204,73 @@ We actually combine the last 2 points into 1 adjustment constant, to minimize th
     \node[annot,above of=Result]{Result};
 \end{tikzpicture}
 
- 
- 
+####Example 
+In this case, we've decided to simulate data, from which we then create 2 very simplistic linear regression models using ordinary least squares (OLS).
 
-TODO: add an example here.
+If you recall from your statistics classes, OLS imposes various assumptions on the data that you're trying to model and on the resulting model. To the extent that the assumptions don't hold, you can end up with poor results, and in some cases you might not even know they're necessarily poor. One of those restrictions is that the residuals (which are defined as the observed value minus the predicted value) should be *white noise*, which means they follow a normal distribution, are uncorrelated, and have constant variance. Under some circumstances, you can keep your OLS model, even if not all boxes are checked off, but in this case we'll assume we're being sticklers.
+
+In a small-data environment, one of the common ways to start testing the white-noie assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 2-sample Kolmogorov Smirnov statistic.
+
+After we train each of our models, we simply draw a large sample from a standard normal distribution and then compare each model's residuals to that. We could have naturally used the 1-sample Kolmogorov-Smirnov test, however, this is meant to provide a more general example of how we might use the 2-sample Kolmogorov-Smirnov test under circumstances where we might not have access to the theoretical cdf, but we do have access to a sample draw from the distribution.
+
+As indicated by the test results, the badly specified model (which has a clearly unnecessary regressor) has residuals that do not satisfy the white noise assumption.
+
+```
+object KolmogorovSmirnovOLS {
+
+  val sc = new SparkContext("local", "ks")
+
+  def main(args: Array[String]): Unit = {
+
+    val n = 1e2.toLong
+    val x1 = normalRDD(sc, n, seed = 10L)
+    val x2 = normalRDD(sc, n, seed = 5L)
+    val X = x1.zip(x2)
+    val y = X.map(x => 2.5 + 3.4 * x._1 + 1.5 * x._2)
+    val data = y.zip(X).map { case (yi, (xi1, xi2)) => (yi, xi1, xi2)}
+
+    val iters = 100
+    val goodModelData = data.map(goodSpec)
+    val goodModel = LinearRegressionWithSGD.train(goodModelData, iters)
+
+    val badModelData = data.map(badSpec)
+    val badModel = LinearRegressionWithSGD.train(badModelData, iters)
+
+    val goodResiduals = goodModelData.map(p => p.label - goodModel.predict(p.features))
+    val badResiduals = badModelData.map(p => p.label - badModel.predict(p.features))
+
+    println(testResiduals(goodResiduals))
+    println(testResiduals(badResiduals))
+  }
+
+  // This model specification captures all the regressors that underly
+  // the true process
+  def goodSpec(obs: (Double, Double, Double)): LabeledPoint = {
+    val X = Array(1.0, obs._2, obs._3)
+    val y = obs._1
+    LabeledPoint(y, Vectors.dense(X)) //
+  }
+
+  def badSpec(obs: (Double, Double, Double)): LabeledPoint = {
+    val X  = Array(1.0, obs._2, obs._2 * obs._1)
+    val y = obs._1
+    LabeledPoint(y, Vectors.dense(X))
+  }
+
+  // We'd like to compare our residuals against the standard normal distribution
+  // But we'd like to use the 2-sample Kolmogorov-Smirnov test, so we'll draw a sample
+  // from that distribution and compare
+  def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
+    val stdNormSample = normalRDD(sc, residuals.count())
+    val mean = residuals.mean()
+    val variance = residuals.map(x => (x - mean) * (x - mean)).mean()
+    val standardizedResiduals = residuals.map(x => (x - mean) / math.sqrt(variance))
+    // TODO: uncomment below once 2-sample included in MLlib
+    //Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
+    Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
+  }
+}
+```
 
 
 Note that the test is meant for continuous distributions, so any ties in ranking will affect the test's power.
@@ -268,12 +331,7 @@ object AndersonDarlingMTA {
       (stop, result)
     }
   }
-
-
 ```
-
-
-
 
 While in this blog post we have used the Scala API, all these tests have also been made available in PySpark, allowing data scientists to calculate familiar statistics on big-data sized samples. As usual, all feedback is welcome. Happy hypothesis-testing!
 
