@@ -370,11 +370,11 @@ Similarly, we need to distinguish between weekdays and weekends. Train service i
     }
 ```
 
-Now that we have our `RDD[TrainEvent]` we will want to focus on just 1 train line for this exercise. We'll pick the downtown (trains in Manhattan have 2 directions: up/down town) 1 train. Why? Subway trains aren't necesssarily "regular" in terms of their schedule. Sometimes some trains run *express* and skip certain stops, even if they're usually *local*, meaning they make every stop. The 1 train is one of the more regular lines, with no scheduled express times.
+Now that we have our `RDD[TrainEvent]` we will want to focus on just 1 train line for this exercise. We'll pick the downtown (trains in Manhattan have 2 directions: up/downtown) 1 train. Why? Subway trains aren't necessarily "regular" in terms of their schedule. Sometimes some trains run *express* and skip certain stops, even if they're usually *local*, meaning they make every stop. The 1 train is one of the more regular lines, with no scheduled express times.
 
-Downtown direction is represented as `1` in the MTA files. The same is the case for arrivals, which are encoded in the `eventType` field. The fact that we've filtered for 1 train, downtown, should be sufficient. However, it seems that when you do so some track ids remain which are incongruent with that, or have an id that is not explicitly explained in the ATS data specfication. We've decided to be a bit conservative and only take those observations whose track id ends in `'1'`, which ATS states is generally the local southbound track.
+Downtown direction is represented as `1` in the MTA files. The same is the case for arrivals, which are encoded in the `eventType` field. The fact that we've filtered for 1 train, downtown, should be sufficient. However, it seems that when you do so some track ids remain which are incongruent with that, or have an id that is not explicitly explained in the ATS data specification. We've decided to be a bit conservative and only take those observations whose track id ends in `'1'`, which ATS states is generally the local southbound track.
 
-We also want to make sure we have as many obervations from the same day close together, since timespans need to be calculated intra-day. To achieve this, we sort the data by timestamp.
+We also want to make sure we have as many observations from the same day close together, since timespans need to be calculated intraday. To achieve this, we sort the data by timestamp.
 
 ```scala
     val train1Down = rushHourData.filter (x =>
@@ -413,7 +413,7 @@ Now we want to compare arrival times within that stop, and we can solely compare
 ```
 In the prior code snippet, you can see that in a given partition, we group arrivals by date. Within each group we have to sort the timestamps again, since Scala's `groupBy` makes no guarantees regarding order. Once we've done that, we can simply pair up each timestamp with the following and calculate the difference. 
 
-There might be some supurious timestamps in there as well, so for good measure we kick out anything with a negative or zero time span (unfortunately MTA has not yet developed time-traveling technologies, so we know these to be data errors).
+There might be some spurious timestamps in there as well, so for good measure we kick out anything with a negative or zero time span (unfortunately MTA has not yet developed time-traveling technologies, so we know these to be data errors).
 
 Now that we have an `RDD[Double]` representing the minutes between arrivals for this stop (i.e. the waiting times between trains), we can test the distribution of values against an Exponential distribution.
 
