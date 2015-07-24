@@ -19,7 +19,7 @@ import org.apache.commons.math3.distribution.ExponentialDistribution
 
 import scala.util.Try
 
-import org.joda.time.{LocalTime, DateTime}
+import org.joda.time.{DateTime, LocalTime}
 import org.joda.time.DateTimeConstants.{MONDAY, FRIDAY}
 
 import org.apache.spark.rdd.RDD
@@ -115,7 +115,7 @@ object AndersonDarlingMTA {
         sortedMillis.zip(sortedMillis.drop(1)).map { case (pt, t) =>
           (t - pt).toDouble / 6e4
         }
-      }.filter(_ > 0).iterator
+      }.iterator
     }
     waitingTimes
   }

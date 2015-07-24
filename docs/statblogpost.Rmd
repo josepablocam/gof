@@ -408,12 +408,10 @@ Now we want to compare arrival times within that stop, and we can solely compare
         sortedMillis.zip(sortedMillis.drop(1)).map { case (pt, t) =>
           (t - pt).toDouble / 6e4
         }
-      }.filter(_ > 0).iterator
+      }
     }
 ```
 In the prior code snippet, you can see that in a given partition, we group arrivals by date. Within each group we have to sort the timestamps again, since Scala's `groupBy` makes no guarantees regarding order. Once we've done that, we can simply pair up each timestamp with the following and calculate the difference. 
-
-There might be some spurious timestamps in there as well, so for good measure we kick out anything with a negative or zero time span (unfortunately MTA has not yet developed time-traveling technologies, so we know these to be data errors).
 
 Now that we have an `RDD[Double]` representing the minutes between arrivals for this stop (i.e. the waiting times between trains), we can test the distribution of values against an Exponential distribution.
 
