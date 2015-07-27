@@ -39,7 +39,7 @@ object AndersonDarlingMTA {
       val dateTime = event.timestamp
       val weekDay = isWeekDay(dateTime)
       val minTol = 1
-      val rushHour = inTimeSlot(dateTime, new LocalTime(5, 0, 0), new LocalTime(8, 0, 0), minTol)
+      val rushHour = inTimeSlot(dateTime, new LocalTime(17, 0, 0), new LocalTime(20, 0, 0), minTol)
       // Memorial Day
       val holiday = new DateTime(2011, 5, 30, 0, 0, 0)
       val notHoliday = !dateTime.withTimeAtStartOfDay.isEqual(holiday.withTimeAtStartOfDay)

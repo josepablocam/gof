@@ -359,8 +359,8 @@ Similarly, we need to distinguish between weekdays and weekends. Train service i
       val minTol = 1
       val rushHour = inTimeSlot(
         dateTime, 
-        new LocalTime(5, 0, 0), 
-        new LocalTime(8, 0, 0), 
+        new LocalTime(17, 0, 0),
+        new LocalTime(20, 0, 0),
         minTol
       )
       // Memorial day
