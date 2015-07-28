@@ -13,42 +13,20 @@ Most people have dealt with averages and standard deviation. These are in effect
 for that description. Sometimes we might want more information, more perspective into that
 data's profile. In a situation like that we might look at other measures, such as [skewness](https://en.wikipedia.org/wiki/Skewness) and [kurtosis](https://en.wikipedia.org/wiki/Kurtosis). However, sometimes we can provide a much neater description
 for data by stating it comes from a given distribution, which not only tells us things
-like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. 
+like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the JIRAS: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov).
 
 # Testing in big-data world
-The world of small-data analytics has many tools to accomplish this. Tools can range from quantitative measures, to more graphical approaches. R, a popular statistical programming language, provides many of the usual measures out-of-the box, and there are a plethora of packages that provide additional goodness-of-fit tests and visualization tools to aide data scientists in determining whether a sample comes from a given distribution (or isn't different enough to warrant ruling that out). The same is true for Python, using the libraries such as SciPy.
+The world of small-data analytics has many tools to accomplish this, ranging from quantitative measures to more graphical approaches. R, a popular statistical programming language, provides many of the usual measures out-of-the box, and there are a plethora of packages that provide additional goodness-of-fit tests and visualization tools to aid data scientists in determining whether a sample comes from a given distribution (or isn't different enough to warrant ruling that out). The same is true for Python, using libraries such as SciPy.
 
-However, these tools are rarely able to natively handle the volume of data associated with big-data problems. And thus unless users want to go with the alternative of testing subsamples of their data, they have to turn to platforms designed to for such big-data tasks. For example, consider a sample of 10,000,000 observations. This immediately rules out using any graphical tools unless you perform something like binning, and then you're throwing out information (which was the whole point of collecting that much data to begin with!). The 
+However, these tools are rarely able to natively handle the volume of data associated with big-data problems. Unless users want to go with the alternative of testing subsamples of their data, they have to turn to platforms designed to for such big-data tasks. For example, consider a sample of 10,000,000 observations. This immediately rules out using any graphical tools unless you perform something like binning, and then you're potentially throwing out information (which was the whole point of collecting that much data to begin with!).  
 
-Apache Spark's MLlib can help analytics users scratch this itch by providing implementations of various popular statistical measures that can handle large-scale data. For example, the Statistics object in MLlib provides various implementations of the Chi-Square test, both as a test for independence and as a goodness-of-fit test. For example, if you were to draw values from a discrete distribution and wanted to test these against expected values, we could then use the `ChiSqrTest(Vector, Vector)` implementation.
-```scala
-  import org.apache.spark.SparkContext
-  import org.apache.spark.mllib.stat.Statistics
-  import org.apache.spark.mllib.linalg.Vectors
-  import org.apache.spark.mllib.random.RandomRDDs.uniformRDD
-  import scala.math.random
-  
-  val sc = new SparkContext("local", "test")
-  val trialsMult = 1e487
-  // We have a bernoulli RV with p = 0.3
-  // each experiment is of size trialsMult * x
-  val p = 0.3
-  val draw = (x: Int) => {
-    Array.fill(trialsMult.toInt * x)(if (random <= p) 1.0 else 0.0).sum
-  }
-  val domain = (1 to 100).toArray
-  val observed = sc.parallelize(domain).map(draw).collect()
-  val expected = domain.map(x => trialsMult * x * p)
-  val test = Statistics.chiSqTest(Vectors.dense(observed), Vectors.dense(expected))
-  test.pValue > 0.05
-```
-In this case, we were able to use the Chi-Square test to show that the divergence between our observed and expected counts is not sufficient to conclude that the process underlying our experiments is not actually Binomial with success probability 30%.
+Apache Spark's MLlib can help analytics' users scratch this itch by providing implementations of various popular statistical measures that can handle large-scale data. For example, the Statistics object in MLlib provides various implementations of the Chi-Square test, both as a test for independence and as a goodness-of-fit test. For example, if you were to collect values and wanted to test these against expected values from a given discrete distribution, in order to draw conclusions about whether the data stems from that distribution, we could use the `ChiSqrTest(Vector, Vector)` implementation.
 
-As useful and powerful as this test is with discrete data, applying it to continuous data is inappropriate. Thus there has been a need for continuous distribution goodness-of-fit testing for big-data needs. Cloudera has most recently contributed various tests (TODO: label exactly which) which fulfill this need and allow users of the platform to use standard goodness-of-fit tests across their applications.
+As useful and powerful as the Chi-Squared test is with discrete data, applying it to continuous data is inappropriate. Thus there has been a need for continuous distribution goodness-of-fit testing for big-data needs. 
 
 #Innocent until proven guilty (read: null until proven alternate!)
-###Jose Question: Should we eliminate this section for brevity? I assume most readers would know this..It might even come across as condescending to include. Thoughts? The only argument I currently have for keeping it is the section title, that I thought was funny
-We might have various distributions that we think fit our data. For example, we might have just fit a linear regression to a dataset, and believe that our residuals are white noise (i.e. standard normal), and we would now like some assurance that this is the case and we're not missing some important features in our model. Or we might have measured the wait time for the 6 train in NYC at the City Hall stop (protip: it's forever...just come to terms with that) and we'd like to model this using an exponential distribution. We now have the task of testing whether our empirical data actually follow these theoretical distributions.
+#TODO: trim down
+We might have various distributions that we think fit our data. For example, we might have just fit a linear regression to a dataset, and believe that our residuals are white noise (i.e. standard normal), and we would now like some assurance that this is the case and we're not missing some important features in our model. We now have the task of testing whether our empirical data actually follow these theoretical distributions.
 
 It is often difficult to conclude that a given hypothesis is correct. However, the converse, concluding that a given hypothesis is wrong, is actually much simpler. This idea might initially seem a bit counterintuitive, but a simple example can clear things up. Let's say a bad back is a common (clearly not professional!) diagnosis for back pain. If I have back pain, it is possible that I might have a bad back. It is also possible that I simply sat for too long. However, if I don't have back pain, it is fairly certain that I don't have a bad back. This drives the underlying intuition behind the concept of a null hypothesis and statistical tests for that hypothesis.
 
@@ -56,7 +34,7 @@ We can use this hammer and nail, a statistic and a hypothesis test, to do someth
 
 #Statistics: Goodness-of-Fit tests
 ##Kolmogorov-Smirnov
-This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The intuition behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the empirical cumulative distribution.
+This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The intuition behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function).
 
 The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
 $$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $Z$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
@@ -92,7 +70,7 @@ Anderson-Darling is often proposed as an alternative to the Kolmogorov-Smirnov s
 
 In contrast to the Kolmogorov-Smirnov test, the Anderson-Darling test for 1-sample has critical values (i.e. the reference points that we will use to accept or dismiss our null hypothesis) that depend on the distribution we are testing against.
 
-The informal intuition behind Anderson-Darling is that *not all distances are equal*, meaning, that a deviation of size $m$ between the empirical CDF curve and the CDF curve should carry different importance depending on where it happens on the curve. Indeed, a small deviation at the start of the CDF or the end could signal that the sample doesn't really stem from that distribution. Why is that? Well, consider that the CDF tends to 0 at the left, and 1 at the right, so there **shouldn't** be any real discrepancies there, for the most part.
+The informal intuition behind Anderson-Darling is that *not all distances are equal*, meaning that a deviation of size $m$ between the empirical CDF curve and the CDF curve should carry different importance depending on where it happens on the curve. Indeed, a small deviation at the start of the CDF or the end could signal that the sample doesn't really stem from that distribution. Why is that? Well, consider that the CDF tends to 0 at the left, and 1 at the right, so there **shouldn't** be any real discrepancies there, for the most part.
 
 Specifically, the Anderson-Darling test weighs the square of the deviations by $\frac{1}{\Phi(x)(1-\Phi(x))}$, where $\Phi$ is once again the CDF.
 
@@ -115,12 +93,12 @@ $$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Ph
 ##Distilling distributed distribution (statistics) (now say that three times fast...)
 Calculating both of these statistics is extremely straightforward when performed in memory. If we have all our data, we can simply traverse it as needed and calculate what we need at each point. Performing the same calculations in a distributed setting can take a bit more craftiness.
 
-Cloudera has contributed distributed implementations of these tests to MLlib. You can now find in the Statistics object: the 1-sample, 2-sided Kolmogorov-Smirnov test; the 2-sample, 2-sided, Kolmogorov-Smirnov test; the 1-sample Anderson-Darling test; and the k-sample Anderson-Darling test. (TODO: update this with a final list of functionality, some of these might not make it in)
+Cloudera has contributed distributed implementations of these tests to MLlib. You can now find in the Statistics object: (TODO: update this with a final list of functionality)
 
-The remainder of this blog focuses on explaining the implementation details, along with some use-case examples for 2 of these tests: the 2-sample Kolmogorov-Smirnov test, and the 1-sample Anderson-Darling test. We've chosen these two as they arguably provide the most interesting implementations.
+The remainder of this blog focuses on explaining the implementation details, along with some use-case examples for 2 of these tests: the 2-sample Kolmogorov-Smirnov test and the 1-sample Anderson-Darling test. We've chosen these two as they arguably provide the most interesting implementations.
 
 ### Locals and Globals
-The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the graph below. We could keep track of the last seen maximum as we traverse the graph from left to right. But, if the graph were divided into parts, we could just as easily simply take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
+The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the graph below. We could keep track of the last seen maximum as we traverse the graph from left to right. But, if the graph were divided into parts, we could just as easily take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
 
 ```{r, echo=FALSE}
 set.seed(1)
@@ -144,9 +122,9 @@ qplot(adjx, y, geom = "point") + #main plot
 
 
 ###2-sample Kolmogorov-Smirnov test
-The 2-sample variant of the KS test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the number of elements in $Z$. This in effect is the CDF curve for $Z$ assuming we view sample 1 and sample 2 as some sort of *step-wise theoretical CDFs*. It makes sense then, that we could in turn compare these curves to test whether the 2 CDFs (and thus the distributions) are the same.
+The 2-sample variant of the Kolmogorov-Smirnov(KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the number of elements in $Z$. This in effect is the CDF curve for $Z$ assuming we view sample 1 and sample 2 as some sort of *step-wise theoretical CDFs*. We can then subtract these 2 values to compare the "distance" between the 2 CDFs.
 
-Implementing this in-memory is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. We are going to have to combine the data and sort it to create $Z$. There is no way for us to get around that. Once we have that, however, we'd like to minimize the amount of unnecessary shuffles (recall, this requires writing out data to disk, which is expensive) and jobs (which isn't quite a shuffle, but still consumes resources).
+Implementing this for a single machine is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. In general, when conceiving distributed algorithms, the goal is to minimize the required communication between nodes.  In the context of Spark this usually means minimizing the number of operations that induce shuffles.  In this case, the algorithm must require at least a single shuffle - there is no getting around the fact that we must union and sort the data, but need we do more?
 
 If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of 1 sample. The 2-sample case is analogous.
 
@@ -172,16 +150,14 @@ qplot(x = data, y = cdfVals) +
   scale_fill_manual(values = c(3), labels = c(expression(alpha)))  
 ```
 
-This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the approproriate constant ($\alpha$ is really $\alpha_i$ for each partition $i$, similarly for $\beta$), and then comparing the results for the maximum.
+This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the appropriate constant ($\alpha$ is really $\alpha_i$ for each partition $i$, similarly for $\beta$) once we’ve collected the values on the driver, and then comparing the results for the maximum.
 
 So in the case of the 2 sample KS test we want each partition to compute 
-
 - The maximum and minimum distance between the local empirical CDFs
 - The count of elements in sample 1
 - The count of elements in sample 2
 
 We actually combine the last 2 points into 1 adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
-
 
 \def\layersep{2.5cm}
 \usetikzlibrary{fit}
@@ -234,7 +210,7 @@ We actually combine the last 2 points into 1 adjustment constant, to minimize th
     \node[annot,above of=Result]{Result};
 \end{tikzpicture}
 
-####Example 
+####Running our test’s implementation on simulated OLS residuals
 In this case, we've decided to simulate data, from which we then create 2 very simplistic linear regression models using ordinary least squares (OLS).
 
 If you recall from your statistics classes, OLS imposes various assumptions on the data that you're trying to model and on the resulting model. To the extent that the assumptions don't hold, you can end up with poor results, and in some cases you might not even know they're necessarily poor. One of those restrictions is that the residuals (which are defined as the observed value minus the predicted value) should be *white noise*, which means they follow a normal distribution, are uncorrelated, and have constant variance. Under some circumstances, you can keep your OLS model, even if not all boxes are checked off, but in this case we'll assume we're being sticklers.
@@ -285,7 +261,7 @@ Now all we need are our residuals. We can obtain these easily using the models' 
 
 ```
 
-In a small-data environment, one of the common ways to start testing the white-noie assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 2-sample Kolmogorov Smirnov statistic. We could have naturally used the 1-sample Kolmogorov-Smirnov test, however, this is meant to provide a more general example of how we might use the 2-sample Kolmogorov-Smirnov test under circumstances where we might not have access to the theoretical cdf, but we do have access to a sample draw from the distribution. The function below performs this test for us.
+In a small-data environment, one of the common ways to start testing the white-noise assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 2-sample Kolmogorov-Smirnov statistic. We could have naturally used the 1-sample Kolmogorov-Smirnov test, however, this is meant to provide a more general example of how we might use the 2-sample Kolmogorov-Smirnov test under circumstances where we might not have access to the theoretical cdf, but we do have access to a sample draw from the distribution. The function below performs this test for us.
 
 ```scala
   def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
@@ -309,13 +285,13 @@ Once we check the test results, we can see that the badly specified model has re
 Note that the test is meant for continuous distributions, so any ties in ranking will affect the test's power.
 
 ###1-sample Anderson-Darling test
-The implementation of the 1-sample Anderson-Darling test provides yet another productive strategy: algebraic transformations that isolate global vs local components can be useful in maximizing how much we can calculate locally and how much information we need to carry to adjust globally later. The Anderson-Darling statistic is frequently formulated as shown below:
+The implementation of the 1-sample Anderson-Darling test provides yet another productive strategy for implementing algorithms in a distributed setting: algebraic manipulations that isolate global vs. local components can be useful in maximizing how much we can calculate locally and how much information we need to carry to adjust globally later. The Anderson-Darling statistic is frequently formulated as shown below:
 
 $$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Phi(Z_{n+1-i}))]$$
 
 By having a term that involved $Z_i$ and $Z_{n+1-i}$, this requires that we have access to elements that may or may not be in the same partition. But we can clearly reformulate this in a way that every term in the statistic solely deals with $Z_i$, thus getting around this issue. We can re-index the second terms so that the sum is based on element $i$, rather than $n+1-i$. The final form of the statistic is then:
 
-$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) \ln( \Phi( Z_i )  + (2(n -i) + 1)\ln (1 - \Phi(Z_{i}))]$$
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) \ln( \Phi( Z_i ) ) + (2(n -i) + 1)\ln (1 - \Phi(Z_{i}))$$
 
 
 For our example, we'll test how well an exponential distribution fits the waiting time between arrivals of the NYC 1 train (downtown bound) at different stops. Such a test might be a natural first line of attack for someone looking to model delays in the subway. For example, if the tests tell us that an exponential distribution cannot be ruled out, then we might decide to use the exponential's CDF to identify unusually long times, and warn users about potential issues on the track.
@@ -340,11 +316,7 @@ Spark makes it very easy to read a directory of files (which is what we get from
 ```scala
     val path = "/Users/josecambronero/Projects/gof/data/mta_may_2011"
     val mtaRaw = sc.textFile(path)
-```
-
-As usual with real-world data, there are likely to be various parsing errors. Some lines might not fit them schema. Some numbers might be smudged with letters. The possibilities are endless. Since we don't quite care to correct these mistakes, given the volume of data we might have, we have decided to simply throw away data that fails to parse. This can be done very easily with Scala's `Try` (I swear this is the only time you'll hear me say this) monad. The general idea behind `Try` is that we can return a value regardless of whether or not there was an exception by wrapping the value (or exception) in a container that indicates what's inside. This allows us to chain operations cleanly. In this case, there are 2 container: `Success` and `Failure`. The latter holds an exception, and the former a value. In this case, we simply filter out `Failure` and extract the value of the `Success` to obtain an `RDD[TrainEvent]`.
-
-```scala
+  // wrap parser in Try to catch any exceptions, then get successes and extract
   val parsed = mtaRaw.map(x => Try(parseTrainEvent(x))).filter(_.isSuccess).map(_.get)
 ```
 
@@ -370,13 +342,14 @@ Similarly, we need to distinguish between weekdays and weekends. Train service i
     }
 ```
 
-Now that we have our `RDD[TrainEvent]` we will want to focus on just 1 train line for this exercise. We'll pick the downtown (trains in Manhattan have 2 directions: up/downtown) 1 train. Why? Subway trains aren't necessarily "regular" in terms of their schedule. Sometimes some trains run *express* and skip certain stops, even if they're usually *local*, meaning they make every stop. The 1 train is one of the more regular lines, with no scheduled express times.
+Now that we have our `RDD[TrainEvent]` we will want to focus on just a single train line for this exercise. We'll pick the downtown (trains in Manhattan have 2 directions: up/downtown) 1 train. Why? Subway trains aren't necessarily "regular" in terms of their schedule. Sometimes some trains run *express* and skip certain stops, even if they're usually *local*, meaning they make every stop. The 1 train is one of the more regular lines, with no scheduled express times.
 
 Downtown direction is represented as `1` in the MTA files. The same is the case for arrivals, which are encoded in the `eventType` field. The fact that we've filtered for 1 train, downtown, should be sufficient. However, it seems that when you do so some track ids remain which are incongruent with that, or have an id that is not explicitly explained in the ATS data specification. We've decided to be a bit conservative and only take those observations whose track id ends in `'1'`, which ATS states is generally the local southbound track.
 
 We also want to make sure we have as many observations from the same day close together, since timespans need to be calculated intraday. To achieve this, we sort the data by timestamp.
 
 ```scala
+ // From ATS docs -> downtown train code:1, arrivals eventType: 1, local southbound track id: 1
     val train1Down = rushHourData.filter (x =>
       x.train == 1 && x.dir == 1 && x.eventType == 1 && x.track.last == '1'
     ).sortBy(x => x.timestamp.getMillis)
@@ -427,5 +400,3 @@ Anderson-Darling is robust to estimating distribution parameters from the data. 
 To see the full code for both examples, please visit [TODO:ADD LINK](link here).
 
 While in this blog post we have used the Scala API, all these tests have also been made available in PySpark, allowing data scientists to calculate familiar statistics on big-data sized samples. As usual, all feedback is welcome. Happy hypothesis-testing!
-
-		

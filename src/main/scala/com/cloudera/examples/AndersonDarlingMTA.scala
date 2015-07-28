@@ -32,6 +32,7 @@ object AndersonDarlingMTA {
     val sc = new SparkContext("local", "test")
     val path = "/Users/josecambronero/Projects/gof/data/mta_may_2011"
     val mtaRaw = sc.textFile(path)
+    // wrap parser in Try to catch any exceptions, then get successes and extract
     val parsed = mtaRaw.map(x => Try(parseTrainEvent(x))).filter(_.isSuccess).map(_.get)
 
     // get: weekday, between 7-8pm, excluding May 30th, 2011
@@ -50,6 +51,7 @@ object AndersonDarlingMTA {
     // stops depending on time of day, and it runs "local", not skipping stations
     // http://web.mta.info/nyct/service/pdf/t1cur.pdf
     // We sort since we want data points from the same day to be close together
+    // From ATS docs -> downtown train code:1, arrivals eventType: 1, local southbound track id: 1
     val train1Down = rushHourData.filter (x =>
       x.train == 1 && x.dir == 1 && x.eventType == 1 && x.track.last == '1'
     ).sortBy(x => x.timestamp.getMillis)
