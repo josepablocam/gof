@@ -294,108 +294,93 @@ By having a term that involved $Z_i$ and $Z_{n+1-i}$, this requires that we have
 $$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) \ln( \Phi( Z_i ) ) + (2(n -i) + 1)\ln (1 - \Phi(Z_{i}))$$
 
 
-For our example, we'll test how well an exponential distribution fits the waiting time between arrivals of the NYC 1 train (downtown bound) at different stops. Such a test might be a natural first line of attack for someone looking to model delays in the subway. For example, if the tests tell us that an exponential distribution cannot be ruled out, then we might decide to use the exponential's CDF to identify unusually long times, and warn users about potential issues on the track.
+For our example, we'll be following inspiration from [this paper](http://www.researchgate.net/publication/273946164_Modeling_Flight_Departure_Delay_Distributions) which studied airplane departure delay distributions in Indonesia. The researchers studied how to fit various types of distributions to both the length of the delay and the time of day during which the delay occurred. We'll be focusing on the former of these.
 
-We'll be using the May 2011 [MTA ATS data](http://web.mta.info/developers/data/nyct/historic/A%20Division%20Historical%20Data%20Documentation.txt). The files are available as csv downloads, with each row providing: the date, train identifier, direction of the train, timestamp of the event, the type of event (arrival or departure), route identifier, stop identifier, and track identifier. 
+We'll be using the 2008 portion of the [Airline on-time performance](http://stat-computing.org/dataexpo/2009/the-data.html) data made available by the [American Statistical Association](http://stat-computing.org/) back in 2009 for a data expo. There are data for every year between 1987 and 2008, but for simplicity we focus on 2008.
 
-We take advantage of Scala's case classes to store each observation in a more easily readable format, given that we can use named accessors rather than have to rely on positional accessors in a normal tuple.
+We take advantage of Scala's case classes to store each observation in a more easily readable format upon parsing, given that we can use named accessors rather than have to rely on positional accessors in a normal tuple.
 
 ```scala
-  case class TrainEvent(
-    timestamp: DateTime,
-    train: Int,
-    dir: Int,
-    eventType: Int,
-    route: String,
-    stop: Int,
-    track: String)
+  case class AirlineObs(
+    timestamp: DateTime, // year(1) + month(2) + day of month(3) + scheduled departure time ((6)
+    carrier: String, // UniqueCarrier(9)
+    tailNum: String, // plane tail number, unique identifier for plane (11)
+    departureDelay: Int, // delays in minutes (16)
+    origin: String, // airport code for origin (17)
+    cancelled: Boolean // was flight canceled (22)
+    )
 ```
 
-Spark makes it very easy to read a directory of files (which is what we get from MTA) into an RDD. Once we have that, it is just a matter of parsing each line into a `TrainEvent` instance.
+Spark makes it very easy to read text files, and directories. In this case, we've unzipped the original download and now have a simple csv file. We simply read this file in as text and parse using a simple function. We remove all failures as they are a result of `NA` departure delay information.
 
 ```scala
-    val path = "/Users/josecambronero/Projects/gof/data/mta_may_2011"
-    val mtaRaw = sc.textFile(path)
-  // wrap parser in Try to catch any exceptions, then get successes and extract
-  val parsed = mtaRaw.map(x => Try(parseTrainEvent(x))).filter(_.isSuccess).map(_.get)
+    // Source: http://stat-computing.org/dataexpo/2009/the-data.html
+    val path = "/Users/josecambronero/Projects/gof/data/2008.csv"
+    val airLineRaw = sc.textFile(path)
+    // wrap parser in Try to catch any exceptions, then get successes and extract
+    val parsed = airLineRaw.map(x => Try(parseAirlineObs(x))).filter(_.isSuccess).map(_.get)
 ```
 
-Users of MTA's system know that train arrival frequency is not constant throughout the day (scheduled arrivals are less frequent at *odd* hours, think 3am on a Monday). So in order for our analysis to be valid, we need to restrict ourselves to a particular time of day. In reality, picking the span of time should be done more methodically, observing the MTA's schedule. However, we'll just pick a reasonable timeframe. We'll focus on the 5pm to 8pm time slot, since that is rush hour, and when delays are most troublesome for both users and service providers. 
-
-Similarly, we need to distinguish between weekdays and weekends. Train service is frequently disrupted over the weekend for repairs etc. Holidays can also be another source of trouble. The data used is all for May 2011, so we'll only worry about filtering out 1 federal holiday: Memorial Day (May 30th, 2011).
+It stands to reason that not all airports will have the same distribution of delays, so we focus our efforts on a single airport: SFO. Additionally, we exclude weekends and Federal holidays, which might unduly influence our numbers. Finally, given the research results in the paper mentioned earlier, we also acknowledge that the distribution of delays is likely to change throughout the day (not only in terms of occurrence but also in terms of length). Given this, we only consider delays that take place between 9am and noon, daily.
 
 ```scala
-      val rushHourData = parsed.filter { event =>
-      val dateTime = event.timestamp
-      val weekDay = isWeekDay(dateTime)
-      val minTol = 1
-      val rushHour = inTimeSlot(
-        dateTime, 
-        new LocalTime(17, 0, 0),
-        new LocalTime(20, 0, 0),
-        minTol
-      )
-      // Memorial day
-      val holiday = new DateTime(2011, 5, 30, 0, 0, 0)
-      val notHoliday = !dateTime.withTimeAtStartOfDay.isEqual(holiday)
-      weekDay && rushHour && notHoliday
+      val targetAirport = "SFO"
+      val sfoDelayData = parsed.filter { obs =>
+      val isSFO = obs.origin == targetAirport
+      val isWorkWeek = isWeekDay(obs.timestamp)
+      val isMorning = inTimeSlot(obs.timestamp, new LocalTime(9, 0, 0), new LocalTime(12, 0, 0), 1)
+      val isDelayed = obs.departureDelay > 0
+      val isNotFederalHoliday = !isFederalHoliday(obs.timestamp)
+      isSFO && isWorkWeek && isMorning && isNotFederalHoliday && isDelayed
     }
 ```
 
-Now that we have our `RDD[TrainEvent]` we will want to focus on just a single train line for this exercise. We'll pick the downtown (trains in Manhattan have 2 directions: up/downtown) 1 train. Why? Subway trains aren't necessarily "regular" in terms of their schedule. Sometimes some trains run *express* and skip certain stops, even if they're usually *local*, meaning they make every stop. The 1 train is one of the more regular lines, with no scheduled express times.
+We will be analyzing each carrier in isolation, as it stands to reason that not all carriers will have the same distribution of delays. Furthermore, the insights from modeling a delay distribution are likely to be most benefitial when we concentrate on a single carrier, since that allows us to provide actionable business insight such as using delay distributions to improve scheduling, as the research paper suggests.
 
-Downtown direction is represented as `1` in the MTA files. The same is the case for arrivals, which are encoded in the `eventType` field. The fact that we've filtered for 1 train, downtown, should be sufficient. However, it seems that when you do so some track ids remain which are incongruent with that, or have an id that is not explicitly explained in the ATS data specification. We've decided to be a bit conservative and only take those observations whose track id ends in `'1'`, which ATS states is generally the local southbound track.
-
-We also want to make sure we have as many observations from the same day close together, since timespans need to be calculated intraday. To achieve this, we sort the data by timestamp.
+In this case, we focus on the top 5 carriers with delays in 2008. Note that this is not normalized, and thus is both a function of a carrier's proclivity for delays but also of a carrier's flight volume. Indeed, most of the names in the top 5 are carriers one would expect to see there solely due to their size: United Airlines, Skywest Airlines, Southwest Airlines, American Airlines, Continental Airlines.
 
 ```scala
- // From ATS docs -> downtown train code:1, arrivals eventType: 1, local southbound track id: 1
-    val train1Down = rushHourData.filter (x =>
-      x.train == 1 && x.dir == 1 && x.eventType == 1 && x.track.last == '1'
-    ).sortBy(x => x.timestamp.getMillis)
+    val topCarriers = sfoDelayData.groupBy(_.carrier).map(x => (x._2.size, x._1)).top(5).map(_._2)
+    val dataForTop = sfoDelayData.filter(x => topCarriers.contains(x.carrier))
 ```
-
-The analysis will require that we frequently query `train1Down` for various stops, as we can only compare arrival times on a per-stop basis. So it makes sense for us to cache that data set, and avoid having it recomputed each time we use it.
+The analysis will require that we frequently query `dataForTop` for each of the carriers. So it makes sense for us to cache that data set, and avoid having it recomputed each time we use it.
 
 ```scala 
-  train1Down.cache()
+  dataForTop.cache()
 ```
 
-Now, for each stop we perform the same steps, so we can take the function described below, on a step-per-step basis, and simply map over all the stops. 
-
-First, we want to filter out all data not pertaining to the stop we're currently focusing on.
+For each carrier, we extract all relevant delays. Note that given the precision that was reported for delay length (minutes) there will inevitably be ties. However, Anderson-Darling (and Kolmogorov-Smirnov) are both meant for continuous data and thus ties can result in poor results. Given this, we add a bit of noise to our numbers to avoid ties (ala R's `jitter`). The noise is uniformly distributed between 0 and 1 and we take 1/100 for each observation. We then produce MLE estimate for the scale and shaper paramaters for a Log-Normal distribution. Finally, we test our data against this distribution by using the Anderson-Darling 1-sample, 2-sided test.
 
 ```scala
-  val stopData = data.filter(_.stop == stop).map(_.timestamp)
+  def testLogNormDist(
+    data: RDD[AirlineObs],
+    carrier: String,
+    rand: RandomGenerator): KolmogorovSmirnovTestResult = {
+    val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
+    val hasTies = delays.distinct().count < delays.count
+    val jittered = if (hasTies) delays.map(x => x + rand.nextDouble / 100) else delays
+    val jitteredLog = jittered.map(math.log)
+    // MLE estimates
+    val scale = jitteredLog.mean()
+    val shape = math.sqrt(jitteredLog.map(x => math.pow(x - scale, 2)).mean())
+    val logNormDist = new LogNormalDistribution(scale, shape)
+    // TODO: replace this with AD eventually
+    val testResult = Statistics.kolmogorovSmirnovTest(
+      jittered,
+      (x: Double) => logNormDist.cumulativeProbability(x)
+    )
+    testResult
+  }
 ```
 
-Now we want to compare arrival times within that stop, and we can solely compare times intra-day. The times are spread across partitions, and thus it is certainly possible that the first observation in partition $i$ is part of the last date seen in partition $i - 1$. However, rather than collect the last date in each partition and share with the next, the simplest approach to take is to simply treat each partition separately, and deal with the fact that there will be some observations we need to throw away as we won't be able to calculate a time span. Namely, the first observation of each date in each partition will not have a timespan from the previous arrival. This kind of decision needs to be made on a case-specific basis, however, in this case, we don't lose enough information to justify increased computational complexity.
+We note that the results tell us that the samples do not come from the distributions specified. This result can come from various sources:
 
-```scala
-    val waitingTimes = stopData.mapPartitions { part =>
-      val local = part.toArray
-      // comparisons should only take place between arrival times in the same day
-      local.groupBy(_.withTimeAtStartOfDay).flatMap { case (date, intraDayTimes) =>
-        // sort times within a day, Scala's groupBy makes no guarantees on ordering
-        val sortedMillis = intraDayTimes.map(_.getMillis).sortBy(x => x)
-        sortedMillis.zip(sortedMillis.drop(1)).map { case (pt, t) =>
-          (t - pt).toDouble / 6e4
-        }
-      }
-    }
-```
-In the prior code snippet, you can see that in a given partition, we group arrivals by date. Within each group we have to sort the timestamps again, since Scala's `groupBy` makes no guarantees regarding order. Once we've done that, we can simply pair up each timestamp with the following and calculate the difference. 
+* The delay length provided was discretized and thus we might have lost information. Our "jitter" trick is really a poor man's solution to avoid ties. The real way would be to have obtained the original measures with increased precision.
+* The log-normal parameters estimated with MLE are known to be biased by outliers, so it is possible that our current estimation method is not the best.
+* The results reported by the research paper were based on 10-minute binned data, so it is possible that the Log-Normal is not an appropriate model in the absence of binning.
 
-Now that we have an `RDD[Double]` representing the minutes between arrivals for this stop (i.e. the waiting times between trains), we can test the distribution of values against an Exponential distribution.
 
-We calculate the mean for the distribution by using the mean of the data. Finally, given this, we can apply MLlib's `AndersonDarlingTest(RDD[Double], String, Double*)`, specifying that this is an exponential distribution and passing in the mean of the distribution.
-
-```scala
-   val mean = waitingTimes.mean()
-   val result = Statistics.andersonDarlingTest(waitingTimes, "exp", mean)
-   (stop, result)
-```
-Anderson-Darling is robust to estimating distribution parameters from the data. This is not the case with other tests necessarily. So in this case, Anderson-Darling is great option to use.
+Although the test's rejection can be initially disappointing for a data scientist (because, let's be honest...we all want our first model to be the "right" model), the test has served its purpose and has made us rethink our current modeling approach and ask some important questions in the process.
 
 To see the full code for both examples, please visit [TODO:ADD LINK](link here).
 

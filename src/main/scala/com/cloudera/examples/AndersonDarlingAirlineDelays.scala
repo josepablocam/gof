@@ -15,8 +15,7 @@
 
 package com.cloudera.examples
 
-import breeze.linalg.Vector
-import org.apache.commons.math3.distribution.{LogNormalDistribution, ExponentialDistribution}
+import org.apache.commons.math3.distribution.{LogNormalDistribution}
 import org.apache.commons.math3.random.{MersenneTwister, RandomGenerator}
 
 import org.apache.spark.rdd.RDD
@@ -32,6 +31,7 @@ import scala.util.{Try, Success, Failure}
 object AndersonDarlingAirlineDelays {
   def main(args: Array[String]): Unit = {
     val sc = new SparkContext("local", "test")
+    // Source: http://stat-computing.org/dataexpo/2009/the-data.html
     val path = "/Users/josecambronero/Projects/gof/data/2008.csv"
     val airLineRaw = sc.textFile(path)
     // wrap parser in Try to catch any exceptions, then get successes and extract
@@ -49,11 +49,10 @@ object AndersonDarlingAirlineDelays {
     }
 
     // We'll perform our analysis on the top 5 carriers with the most data points
-
     val topCarriers = sfoDelayData.groupBy(_.carrier).map(x => (x._2.size, x._1)).top(5).map(_._2)
     val dataForTop = sfoDelayData.filter(x => topCarriers.contains(x.carrier))
 
-    // Cache since we will be looking up against dataForTop for each stop separately
+    // Cache since we will be looking up against dataForTop for each carrier separately
     dataForTop.cache()
 
     val rand = new MersenneTwister(10L)
@@ -69,7 +68,6 @@ object AndersonDarlingAirlineDelays {
     }
   }
 
-  // http://stat-computing.org/dataexpo/2009/the-data.html
   case class AirlineObs(
     timestamp: DateTime, // year(1) + month(2) + day of month(3) + scheduled departure time ((6)
     carrier: String, // UniqueCarrier(9)
@@ -116,6 +114,8 @@ object AndersonDarlingAirlineDelays {
     federalHolidays08.contains(dt.toLocalDate)
   }
 
+  // Following inspiration from
+  // http://www.researchgate.net/publication/273946164_Modeling_Flight_Departure_Delay_Distributions
   def testLogNormDist(
     data: RDD[AirlineObs],
     carrier: String,
