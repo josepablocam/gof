@@ -1,0 +1,259 @@
+---
+title: "Continuous Distribution Goodness-of-Fit in MLlib: Kolmogorov-Smirnov Testing in Spark"
+author: "Jose Cambronero"
+header-includes:
+  - \usepackage{tikz}
+output: pdf_document
+highlight: pygments
+---
+
+#Data's portrait
+Data can come in many shapes and forms, and can be described in many ways.
+Statistics like the mean and standard deviation of a sample provide descriptions of some of its important qualities.  Less commonly used statistics such as [skewness](https://en.wikipedia.org/wiki/Skewness) and [kurtosis](https://en.wikipedia.org/wiki/Kurtosis) provide additional perspective into the data’s profile.  However, sometimes we can provide a much neater description
+for data by stating that a sample comes from a given distribution, which not only tells us things
+like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the Spark JIRAS: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov). In this post we’ll discuss the first two tests.
+
+# Testing in big-data world
+The world of small-data analytics has many tools to accomplish this, ranging from quantitative measures to more graphical approaches. R, a popular statistical programming language, provides many of the usual measures out-of-the box, and there are a plethora of packages that provide additional goodness-of-fit tests and visualization tools to aid data scientists in determining whether a sample comes from a given distribution (or isn't different enough to warrant ruling that out). The same is true for Python, using libraries such as SciPy.
+
+However, these tools are rarely able to natively handle the volume of data associated with big-data problems. Unless users want to go with the alternative of testing subsamples of their data, they have to turn to platforms designed to for such big-data tasks.
+
+Apache Spark's MLlib can help scratch this itch by providing implementations of various popular statistical measures that can handle large-scale data. For example, the Statistics object in MLlib provides various implementations of the Chi-Square test, both as a test for independence and as a goodness-of-fit test. If you were to collect values and wanted to test these against expected values from a given discrete distribution, in order to draw conclusions about whether the data stems from that distribution, we could use the `ChiSqrTest(Vector, Vector)` implementation.
+
+As useful and powerful as the Chi-Squared test is with discrete data, applying it to continuous data is inappropriate. Thus there has been a need for continuous distribution goodness-of-fit testing for big-data needs. 
+
+#Innocent until proven guilty (read: null until proven alternate!)
+We might have various distributions that we think fit our data. We now have the task of testing whether our empirical data actually follow these theoretical distributions.
+
+It is often difficult to conclude that a given hypothesis is correct. However, the converse, concluding that a given hypothesis is wrong, can be simpler. This idea might initially seem a bit counterintuitive, but a simple example can clear things up. Let's say a bad back is a common (clearly not professional!) diagnosis for back pain. If I have back pain, it is possible that I might have a bad back. It is also possible that I simply sat for too long. However, if I don't have back pain, it is fairly certain that I don't have a bad back. This drives the underlying intuition behind the concept of a null hypothesis and statistical tests for that hypothesis.
+
+We can use this approach to do something similar with our potential distributions. We'll discuss 2 such standard statistical tests in this and a following blog post: the Kolmogorov-Smirnov test, and the Anderson-Darling test. While "passing" the test doesn't guarantee that the data comes from that distribution, failing can demonstrate that it does not.
+
+#Statistics: Goodness-of-Fit tests
+##Kolmogorov-Smirnov
+This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The procedure behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function).
+
+The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
+$$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $Z$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
+
+The general intuition is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
+
+```{r, echo=FALSE, smallplot}
+### Demonstrating KS stat graphically
+library(ggplot2)
+n <- 100
+dataSample <- sort(rnorm(n))
+ecdf <- seq_along(dataSample) / n
+cdf <- sapply(dataSample, function(x) pnorm(x, mean = 1.3))
+dists <- abs(ecdf - cdf) #roughly..note that real KS is not symmetric
+maxDist <- max(dists)
+maxIx <- which(dists == maxDist)
+
+qplot(x = dataSample, y = ecdf, geom = "line", color = "ECDF") +
+  geom_line(aes(y = cdf, color = "CDF")) +
+  geom_segment(aes(x = dataSample[maxIx], xend = dataSample[maxIx],
+                   y = ecdf[maxIx], yend = cdf[maxIx],
+                   color = "distance"), linetype = "dashed"
+                   ) +
+  labs(y = "Cumulative Probability", x = "X", color = "")
+  
+```
+
+One of the main appeals of this test centers around the fact that the test is distribution-agnostic. By that we mean that the statistic can be calculated and compared the same way regardless of the theoretical distribution we are interested in comparing against (or the actual distributions of the 1 or 2 samples, depending on the test variant being performed).
+
+#Implementations
+##Distilling distributed distribution (statistics) (now say that three times fast...)
+Calculating both of these statistics is extremely straightforward when performed in memory. If we have all our data, we can simply traverse it as needed and calculate what we need at each point. Performing the same calculations in a distributed setting can take a bit more craftiness.
+
+The remainder of this blog focuses on explaining the implementation details, along with an example, for the 2-sample Kolmogorov-Smirnov test. 
+
+### Locals and Globals
+The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the graph below. We could keep track of the last seen maximum as we traverse the graph from left to right. But, if the graph were divided into parts, we could just as easily take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
+
+```{r, echo=FALSE}
+set.seed(1)
+x <- seq(100)
+y <- rnorm(100) + rnorm(100)*rbinom(100, 1, 0.3) #add spikes to N(0,1) with prob 0.3
+isBoundary <- x %% 10 == 0 # part every 10 and
+adjx <- x + runif(1)*isBoundary # move points along x a bit if at boundary
+partIds <- 1 + cumsum(isBoundary)  #give them an id
+localMaxCoords <- data.frame(y = tapply(y, partIds, max)) #max in each partition
+localMaxCoords$x <- adjx[which(y == localMaxCoords$y[partIds])] #index of the max in each
+globalMaxCoords <- data.frame(x = adjx[which(y == max(y))], y = max(y))
+
+qplot(adjx, y, geom = "point") + #main plot
+  geom_vline(xintercept = which(isBoundary), linetype = "longdash", color = "pink") +
+  geom_point(data = localMaxCoords, aes(x = x, y = y, color = "local max"),
+               shape = 1, size = 4, fill = NA) +
+  geom_point(data = globalMaxCoords, aes(x = x, y = y, color = "global max"),
+            shape = 1, size = 8, fill = NA) +
+  labs(x="",y="", color ="")
+```
+
+
+###2-sample Kolmogorov-Smirnov test
+The 2-sample variant of the Kolmogorov-Smirnov(KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the number of elements in $Z$. This in effect is the CDF curve for $Z$ assuming we view sample 1 and sample 2 as some sort of *step-wise theoretical CDFs*. We can then subtract these 2 values to compare the "distance" between the 2 CDFs.
+
+Implementing this for a single machine is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. In general, when conceiving distributed algorithms, the goal is to minimize the required communication between nodes.  In the context of Spark this usually means minimizing the number of operations that induce shuffles.  In this case, the algorithm must require at least a single shuffle - there is no getting around the fact that we must union and sort the data, but need we do more?
+
+If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of 1 sample. The 2-sample case is analogous.
+
+```{r, echo=FALSE, warning=FALSE}
+set.seed(1)
+data <- sort(rnorm(100))
+cdfVals <- sapply(data, pnorm)
+partBoundariesIx <- c(24, 45)
+partBoundaries <- data[partBoundariesIx]
+localIx <- seq(partBoundariesIx[1], partBoundariesIx[2])
+xLocal <- data[localIx]
+yLocal <- cdfVals[localIx] - cdfVals[localIx][1] #shifted down by first
+ribbonCoords <- data.frame(x = rep(0, 100), ymin = rep(0, 100), ymax = rep(0, 100))
+ribbonCoords$x[localIx] <- xLocal
+ribbonCoords$ymin[localIx] <- yLocal
+ribbonCoords$ymax[localIx] <- cdfVals[localIx]
+
+qplot(x = data, y = cdfVals) + 
+  geom_point(aes(x = xLocal, y = yLocal, color = "local")) + 
+  geom_ribbon(data = ribbonCoords, aes(x = x, ymin = ymin, ymax = ymax, 
+                                       fill = "distance"), alpha = 0.25) +
+  labs(x = "x", y = expression(Phi(x)), color = "", fill = "") +
+  scale_fill_manual(values = c(3), labels = c(expression(alpha)))  
+```
+
+This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the appropriate constant ($\alpha$ is really $\alpha_i$ for each partition $i$, similarly for $\beta$) once we’ve collected the values on the driver, and then comparing the results for the maximum.
+
+So in the case of the 2 sample KS test we want each partition to compute 
+- The maximum and minimum distance between the local empirical CDFs
+- The count of elements in sample 1
+- The count of elements in sample 2
+
+We actually combine the last 2 points into 1 adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
+
+\def\layersep{2.5cm}
+\usetikzlibrary{fit}
+\begin{tikzpicture}[shorten >=1pt,->,draw=black!50, node distance=\layersep, scale=1.5]
+    \tikzstyle{every pin edge}=[<-,shorten <=1pt]
+    \tikzstyle{sparkNode}=[circle,fill=black!25,minimum size=17pt,inner sep=0pt]
+    \tikzstyle{partition}=[sparkNode, fill=red!50];
+    \tikzstyle{local}=[sparkNode, fill=yellow!50];
+    \tikzstyle{result}=[sparkNode, fill=green!50];
+    \tikzstyle{annot} = [text width=4em, text centered]
+
+    % Draw the partition layer nodes
+    \foreach \name / \y in {1,...,3}
+        \node[partition, pin=left:\#\y] (P-\name) at (0,-\y) {};
+    \node[partition, pin=left:...](P-ellipsis) at (0, -4){};
+
+    % Draw the driver layer nodes
+    \foreach \name / \y in {1, ..., 3}
+            \node[local] (L-\name) at (\layersep,-\y) {};
+    \node[local](L-ellipsis) at (\layersep, -4){};
+    
+    
+    % Draw arrows between local layer nodes
+    \path (L-1) edge[bend left] node[font=\tiny, right] {adj. constant} (L-2);
+    \path (L-2) edge[bend left] (L-3);
+    \path (L-3) edge[bend left] (L-ellipsis);
+    
+    %\node[driver,pin={[pin edge={->}]right:Output}, right of=P-3] (D) {};
+
+    % Connect every node in the input layer with the local node
+    \foreach \source in {1,...,3}
+            \path (P-\source) edge (L-\source);
+    \path (P-ellipsis) edge node[font=\tiny, above]{(min,max, $adj_i$)}(L-ellipsis);
+    
+    %Draw box around local nodes
+    \node[draw,red, dotted,fit=(L-1) (L-2) (L-3) (L-ellipsis)] {};
+    
+    %Create result node
+    \node[result] (Result) at (2 * \layersep, -3){};
+    
+    %Connect each local node with result
+    \path (L-1) edge node[font=\tiny, right] {adjusted max/min} (Result);
+    \path (L-2) edge (Result); 
+    \path (L-3) edge (Result);
+    \path (L-ellipsis) edge (Result);
+    
+    % Annotate the layers
+    \node[annot,above of=P-1, node distance=1cm]  (partsAnnot) {Partitions};
+    \node[annot,right of=partsAnnot] {Driver};
+    \node[annot,above of=Result]{Result};
+\end{tikzpicture}
+
+####Running our test’s implementation on simulated OLS residuals
+In this case, we've decided to simulate data, from which we then create 2 very simplistic linear regression models using ordinary least squares (OLS).
+
+If you recall from your statistics classes, OLS imposes various assumptions on the data that you're trying to model and on the resulting model. To the extent that the assumptions don't hold, you can end up with poor results, and in some cases you might not even know they're necessarily poor. One of those restrictions is that the residuals (which are defined as the observed value minus the predicted value) should be *white noise*, which means they follow a normal distribution, are uncorrelated, and have constant variance. Under some circumstances, you can keep your OLS model, even if not all boxes are checked off, but in this case we'll assume we're being sticklers.
+
+We'll begin by generating our data: 2 regressors, which are combined to create a dependent variable. We can very easily generate a distributed sample from a normal distribution by using Spark's `RandomRDD`, which is part of `MLlib`.
+
+```scala
+    val n = 1e6.toLong
+    val x1 = normalRDD(sc, n, seed = 10L)
+    val x2 = normalRDD(sc, n, seed = 5L)
+    val X = x1.zip(x2)
+    val y = X.map(x => 2.5 + 3.4 * x._1 + 1.5 * x._2)
+    val data = y.zip(X).map { case (yi, (xi1, xi2)) => (yi, xi1, xi2) }
+```
+Once we've defined our data, we specify 2 models. One which is clearly wrong. In turn, this means that the residuals for the incorrect model should not satisfy the white noise assumption.
+```scala
+  // This model specification captures all the regressors that underly
+  // the true process
+  def goodSpec(obs: (Double, Double, Double)): LabeledPoint = {
+    val X = Array(1.0, obs._2, obs._3)
+    val y = obs._1
+    LabeledPoint(y, Vectors.dense(X)) //
+  }
+
+  // this is a bad model
+  def badSpec(obs: (Double, Double, Double)): LabeledPoint = {
+    val X  = Array(1.0, obs._2, obs._2 * obs._1)
+    val y = obs._1
+    LabeledPoint(y, Vectors.dense(X))
+  }
+```
+We specified the models as simple functions, since we can then map over the observations RDD and obtain an `RDD[LabeledPoint]`, which is exactly what MLlib's [linear regression implementation](http://spark.apache.org/docs/latest/mllib-linear-methods.html#linear-least-squares-lasso-and-ridge-regression) expects.
+
+```scala
+    val iters = 100
+    val goodModelData = data.map(goodSpec)
+    val goodModel = LinearRegressionWithSGD.train(goodModelData, iters)
+
+    val badModelData = data.map(badSpec)
+    val badModel = LinearRegressionWithSGD.train(badModelData, iters)
+```
+
+Now all we need are our residuals. We can obtain these easily using the models' `predict` function.
+
+```scala
+    val goodResiduals = goodModelData.map(p => p.label -  goodModel.predict(p.features))
+    val badResiduals = badModelData.map(p => p.label - badModel.predict(p.features))
+
+```
+
+In a small-data environment, one of the common ways to start testing the white-noise assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 2-sample Kolmogorov-Smirnov statistic. We could have naturally used the 1-sample Kolmogorov-Smirnov test, however, this is meant to provide a more general example of how we might use the 2-sample Kolmogorov-Smirnov test under circumstances where we might not have access to the theoretical cdf, but we do have access to a sample draw from the distribution. The function below performs this test for us.
+
+```scala
+  def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
+    val stdNormSample = normalRDD(sc, residuals.count())
+    val mean = residuals.mean()
+    val variance = residuals.map(x => (x - mean) * (x - mean)).mean()
+    val standardizedResiduals = residuals.map(x => (x - mean) / math.sqrt(variance))
+    // TODO: uncomment below once 2-sample included in MLlib
+    //Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
+    Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
+  }
+```
+
+Once we check the test results, we can see that the badly specified model has residuals that do not satisfy the white noise assumption.
+
+```scala
+    println(testResiduals(goodResiduals))
+    println(testResiduals(badResiduals))
+```
+
+Note that the test is meant for continuous distributions, so any ties in ranking will affect the test's power.
+
+To see the full code for this example, please visit [TODO:ADD LINK](link here).
+
+While in this blog post we have used the Scala API, all these tests have also been made available in PySpark (TODO: add missing to pyspark), allowing data scientists to calculate familiar statistics on big-data sized samples. As usual, all feedback is welcome. Happy hypothesis-testing!

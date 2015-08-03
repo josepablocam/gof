@@ -1,0 +1,131 @@
+---
+title: "Continuous Distribution Goodness-of-Fit in MLlib: Anderson-Darling Testing in Spark"
+author: "Jose Cambronero"
+header-includes:
+  - \usepackage{tikz}
+output: pdf_document
+highlight: pygments
+---
+In a prior post [TODO: LINK TO POST](here) we discussed implementing the Kolmogorov-Smirnov test in Spark. In this follow-on post, we’ll visit an alternative goodness-of-fit test: Anderson-Darling test.
+
+##Anderson-Darling
+Anderson-Darling is often proposed as an alternative to the Kolmogorov-Smirnov statistic, with the advantage that it is better suited to identify departures from the theoretical distribution at the tails, and is more robust towards the nuances associated with estimating the distribution's parameters directly from the sample that we're trying to test.
+
+In contrast to the Kolmogorov-Smirnov test, the Anderson-Darling test for 1-sample has critical values (i.e. the reference points that we will use to accept or dismiss our null hypothesis) that depend on the distribution we are testing against.
+
+The informal intuition behind Anderson-Darling is that *not all distances are equal*, meaning that a deviation of size $m$ between the empirical CDF curve and the CDF curve should carry different importance depending on where it happens on the curve. Indeed, a small deviation at the start of the CDF or the end could signal that the sample doesn't really stem from that distribution. Why is that? Well, consider that the CDF tends to 0 at the left, and 1 at the right, so there **shouldn't** be any real discrepancies there, for the most part.
+
+Specifically, the Anderson-Darling test weighs the square of the deviations by $\frac{1}{\Phi(x)(1-\Phi(x))}$, where $\Phi$ is once again the CDF.
+
+The graph below shows the point we made earlier, departures at the tails are weighed more heavily, and contribute to the overall sum, even if they're nominally small.
+
+```{r, echo=FALSE}
+### Demonstrating weight function in Anderson-Darling
+left <- seq(0, 1, 0.05)
+right <- 1 - left
+weight <- 1 / (left * right)
+qplot(x = left, y = weight, geom="line") + labs(x = expression(Phi(x)), y = "weight")
+```
+
+Let's take a look at the formula definition of Anderson-Darling (for brevity sake, we will solely consider the computational formula, not the formal version which involves an integral from $-\infty$ to $\infty$).
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Phi(Z_{n+1-i}))]$$
+
+###1-sample Anderson-Darling test
+The implementation of the 1-sample Anderson-Darling test provides yet another productive strategy for implementing algorithms in a distributed setting: algebraic manipulations that isolate global versus local components can be useful in maximizing how much we can calculate locally and how much information we need to carry to adjust globally later. The Anderson-Darling statistic is frequently formulated as shown below:
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) [\ln( \Phi( Z_i ) ) + \ln (1 - \Phi(Z_{n+1-i}))]$$
+
+By having a term that involved $Z_i$ and $Z_{n+1-i}$, this requires that we have access to elements that may or may not be in the same partition. But we can clearly reformulate this in a way that every term in the statistic solely deals with $Z_i$, thus getting around this issue. We can re-index the second terms so that the sum is based on element $i$, rather than $n+1-i$. The final form of the statistic is then:
+
+$$A = -N - \frac{1}{N}\sum_{i = 1}^n (2i + 1) \ln( \Phi( Z_i ) ) + (2(n -i) + 1)\ln (1 - \Phi(Z_{i}))$$
+
+For our example, we'll be following inspiration from [this paper](http://www.researchgate.net/publication/273946164_Modeling_Flight_Departure_Delay_Distributions) which studied airplane departure delay distributions in Indonesia. The researchers studied how to fit various types of distributions to both the length of the delay and the time of day during which the delay occurred. We'll be focusing on the former of these.
+
+We'll be using the 2008 portion of the [Airline on-time performance](http://stat-computing.org/dataexpo/2009/the-data.html) data made available by the [American Statistical Association](http://stat-computing.org/) back in 2009 for a data expo. There are data for every year between 1987 and 2008, but for simplicity we focus on 2008.
+
+We take advantage of Scala's case classes to store each observation in a more easily readable format upon parsing, given that we can use named accessors rather than have to rely on positional accessors in a normal tuple.
+
+```scala
+  case class AirlineObs(
+    timestamp: DateTime, // year(1) + month(2) + day of month(3) + scheduled departure time ((6)
+    carrier: String, // UniqueCarrier(9)
+    tailNum: String, // plane tail number, unique identifier for plane (11)
+    departureDelay: Int, // delays in minutes (16)
+    origin: String, // airport code for origin (17)
+    cancelled: Boolean // was flight canceled (22)
+    )
+```
+
+Spark makes it very easy to read text files, and directories. In this case, we've unzipped the original download and now have a simple csv file. We simply read this file in as text and parse using a simple function. We remove all failures as they are a result of `NA` departure delay information.
+
+```scala
+    // Source: http://stat-computing.org/dataexpo/2009/the-data.html
+    val path = "/Users/josecambronero/Projects/gof/data/2008.csv"
+    val airLineRaw = sc.textFile(path)
+    // wrap parser in Try to catch any exceptions, then get successes and extract
+    val parsed = airLineRaw.map(x => Try(parseAirlineObs(x))).filter(_.isSuccess).map(_.get)
+```
+
+It stands to reason that not all airports will have the same distribution of delays, so we focus our efforts on a single airport: SFO. Additionally, we exclude weekends and Federal holidays, which might unduly influence our numbers. Finally, given the research results in the paper mentioned earlier, we also acknowledge that the distribution of delays is likely to change throughout the day (not only in terms of occurrence but also in terms of length). Given this, we only consider delays that take place between 9am and noon, daily.
+
+```scala
+      val targetAirport = "SFO"
+      val sfoDelayData = parsed.filter { obs =>
+      val isSFO = obs.origin == targetAirport
+      val isWorkWeek = isWeekDay(obs.timestamp)
+      val isMorning = inTimeSlot(obs.timestamp, new LocalTime(9, 0, 0), new LocalTime(12, 0, 0), 1)
+      val isDelayed = obs.departureDelay > 0
+      val isNotFederalHoliday = !isFederalHoliday(obs.timestamp)
+      isSFO && isWorkWeek && isMorning && isNotFederalHoliday && isDelayed
+    }
+```
+
+We will be analyzing each carrier in isolation, as it stands to reason that not all carriers will have the same distribution of delays. Furthermore, the insights from modeling a delay distribution are likely to be most benefitial when we concentrate on a single carrier, since that allows us to provide actionable business insight such as using delay distributions to improve scheduling, as the research paper suggests.
+
+In this case, we focus on the top 5 carriers with delays in 2008. Note that this is not normalized, and thus is both a function of a carrier's proclivity for delays but also of a carrier's flight volume. Indeed, most of the names in the top 5 are carriers one would expect to see there solely due to their size: United Airlines, Skywest Airlines, Southwest Airlines, American Airlines, Continental Airlines.
+
+```scala
+    val topCarriers = sfoDelayData.groupBy(_.carrier).map(x => (x._2.size, x._1)).top(5).map(_._2)
+    val dataForTop = sfoDelayData.filter(x => topCarriers.contains(x.carrier))
+```
+The analysis will require that we frequently query `dataForTop` for each of the carriers. So it makes sense for us to cache that data set, and avoid having it recomputed each time we use it.
+
+```scala 
+  dataForTop.cache()
+```
+
+For each carrier, we extract all relevant delays. Note that given the precision that was reported for delay length (minutes) there will inevitably be ties. However, Anderson-Darling (and Kolmogorov-Smirnov) are both meant for continuous data and thus ties can result in poor results. Given this, we add a bit of noise to our numbers to avoid ties (ala R's `jitter`). The noise is uniformly distributed between 0 and 1 and we take 1/100 for each observation. We then produce MLE estimate for the scale and shape parameters for a Log-Normal distribution. Finally, we test our data against this distribution by using the Anderson-Darling 1-sample, 2-sided test.
+
+```scala
+  def testLogNormDist(
+    data: RDD[AirlineObs],
+    carrier: String,
+    rand: RandomGenerator): KolmogorovSmirnovTestResult = {
+    val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
+    val hasTies = delays.distinct().count < delays.count
+    val jittered = if (hasTies) delays.map(x => x + rand.nextDouble / 100) else delays
+    val jitteredLog = jittered.map(math.log)
+    // MLE estimates
+    val scale = jitteredLog.mean()
+    val shape = math.sqrt(jitteredLog.map(x => math.pow(x - scale, 2)).mean())
+    val logNormDist = new LogNormalDistribution(scale, shape)
+    // TODO: replace this with AD eventually
+    val testResult = Statistics.kolmogorovSmirnovTest(
+      jittered,
+      (x: Double) => logNormDist.cumulativeProbability(x)
+    )
+    testResult
+  }
+```
+
+We note that the results tell us that the samples do not come from the distributions specified. This result can come from various sources:
+
+* The delay length provided was discretized and thus we might have lost information. Our "jitter" trick is really a poor man's solution to avoid ties. The real way would be to have obtained the original measures with increased precision.
+* The log-normal parameters estimated with MLE are known to be biased by outliers, so it is possible that our current estimation method is not the best.
+* The results reported by the research paper were based on 10-minute binned data, so it is possible that the Log-Normal is not an appropriate model in the absence of binning.
+
+Although the test's rejection can be initially disappointing for a data scientist (because, let's be honest...we all want our first model to be the "right" model), the test has served its purpose and has made us rethink our current modeling approach and ask some important questions in the process. Additionally, there is always the important question to ask: the model didn’t tick off all boxes, but is there still some value in it? Sometimes a model may not represent a process 100% faithfully, but it can still yield interesting insight if its flaws are correctly understood. In our case, the Log-Normal distribution’s CDF seems to fit decently well for shorter delays, so a possible alternative would be to assume this distribution for that domain and switch to a better distribution for more extensive delays.
+
+To see the full code for this example, please visit [TODO:ADD LINK](link here).
+
