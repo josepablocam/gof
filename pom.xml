@@ -180,13 +180,13 @@
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-yarn-client</artifactId>
       <version>2.6.0</version>
-     <!-- <scope>provided</scope> -->
-    </dependency>
-    <dependency>
-      <groupId>org.scala-lang</groupId>
-      <artifactId>scala-library</artifactId>
-      <version>${scala.complete.version}</version>
-     <!-- <scope>provided</scope> -->
+      <scope>provided</scope>
+     </dependency>
+     <dependency>
+       <groupId>org.scala-lang</groupId>
+       <artifactId>scala-library</artifactId>
+       <version>${scala.complete.version}</version>
+       <scope>provided</scope>
     </dependency>
     <!-- Make sure this version is harmonized -->
     <dependency>
@@ -203,44 +203,44 @@
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-core_${scala.minor.version}</artifactId>
       <version>${spark.version}</version>
-    <!--  <scope>provided</scope> -->
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-sql_${scala.minor.version}</artifactId>
       <version>${spark.version}</version>
-    <!--  <scope>provided</scope> -->
-    </dependency>
-    <dependency>
-      <groupId>org.apache.spark</groupId>
-      <artifactId>spark-catalyst_${scala.minor.version}</artifactId>
-      <version>${spark.version}</version>
-    <!--  <scope>provided</scope> -->
-    </dependency>
-    <dependency>
-      <groupId>org.apache.spark</groupId>
-      <artifactId>spark-mllib_${scala.minor.version}</artifactId>
-      <version>${spark.version}</version>
-    <!--  <scope>provided</scope> -->
-    </dependency>
-    <dependency>
-      <groupId>com.github.nscala-time</groupId>
-      <artifactId>nscala-time_2.10</artifactId>
-      <version>1.8.0</version>
-    </dependency>
-    <dependency>
-      <groupId>org.scalatest</groupId>
-      <artifactId>scalatest_${scala.minor.version}</artifactId>
-      <version>2.2.1</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.scalanlp</groupId>
-      <artifactId>breeze_${scala.minor.version}</artifactId>
-      <version>0.10</version>
-      <exclusions>
-        <!-- This is included as a compile-scoped dependency by jtransforms, which is
-             a dependency of breeze. -->
+      <scope>provided</scope>
+   </dependency>
+   <dependency>
+     <groupId>org.apache.spark</groupId>
+     <artifactId>spark-catalyst_${scala.minor.version}</artifactId>
+     <version>${spark.version}</version>
+     <scope>provided</scope>
+   </dependency>
+   <dependency>
+     <groupId>org.apache.spark</groupId>
+     <artifactId>spark-mllib_${scala.minor.version}</artifactId>
+     <version>${spark.version}</version>
+     <scope>provided</scope>
+   </dependency>
+   <dependency>
+     <groupId>com.github.nscala-time</groupId>
+     <artifactId>nscala-time_2.10</artifactId>
+     <version>1.8.0</version>
+   </dependency>
+   <dependency>
+     <groupId>org.scalatest</groupId>
+     <artifactId>scalatest_${scala.minor.version}</artifactId>
+     <version>2.2.1</version>
+     <scope>test</scope>
+   </dependency>
+   <dependency>
+     <groupId>org.scalanlp</groupId>
+     <artifactId>breeze_${scala.minor.version}</artifactId>
+     <version>0.10</version>
+     <exclusions>
+       <!-- This is included as a compile-scoped dependency by jtransforms, which is
+            a dependency of breeze. -->
         <exclusion>
           <groupId>junit</groupId>
           <artifactId>junit</artifactId>

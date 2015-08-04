@@ -15,7 +15,7 @@
 
 package com.cloudera.examples
 
-import org.apache.commons.math3.distribution.{LogNormalDistribution}
+import org.apache.commons.math3.distribution.NormalDistribution
 import org.apache.commons.math3.random.{MersenneTwister, RandomGenerator}
 
 import org.apache.spark.rdd.RDD
@@ -32,12 +32,12 @@ object AndersonDarlingAirlineDelays {
   def main(args: Array[String]): Unit = {
     val sc = new SparkContext("local", "test")
     // Source: http://stat-computing.org/dataexpo/2009/the-data.html
-    val path = "/Users/josecambronero/Projects/gof/data/2008.csv"
+    val path = getClass().getClassLoader().getResource("2008.csv").getFile()
     val airLineRaw = sc.textFile(path)
     // wrap parser in Try to catch any exceptions, then get successes and extract
     val parsed = airLineRaw.map(x => Try(parseAirlineObs(x))).filter(_.isSuccess).map(_.get)
 
-    // let's focus on SFO, during the work week, in the morning, 7:00am - 12pm
+    // let's focus on SFO, during the work week, in the morning, 9:00am - 12pm
     val targetAirport = "SFO"
     val sfoDelayData = parsed.filter { obs =>
       val isSFO = obs.origin == targetAirport
@@ -91,7 +91,6 @@ object AndersonDarlingAirlineDelays {
     AirlineObs(timestamp, carrier, tailNum, departureDelay, origin, cancelled)
   }
 
-
   def isWeekDay(dt: DateTime): Boolean = dt.getDayOfWeek >= MONDAY && dt.getDayOfWeek <= FRIDAY
 
   def inTimeSlot(
@@ -122,16 +121,16 @@ object AndersonDarlingAirlineDelays {
     rand: RandomGenerator): KolmogorovSmirnovTestResult = {
     val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
     val hasTies = delays.distinct().count < delays.count
-    val jittered = if (hasTies) delays.map(x => x + rand.nextDouble / 100) else delays
-    val jitteredLog = jittered.map(math.log)
+    val jittered = if (hasTies) delays.map(_ + rand.nextDouble / 100) else delays
+    val jitteredLogged = jittered.map(math.log)
     // MLE estimates
-    val scale = jitteredLog.mean()
-    val shape = math.sqrt(jitteredLog.map(x => math.pow(x - scale, 2)).mean())
-    val logNormDist = new LogNormalDistribution(scale, shape)
-    // TODO: replace this with AD eventually
-    val testResult = Statistics.kolmogorovSmirnovTest(
+    val scale = jitteredLogged.mean()
+    val shape = math.sqrt(jitteredLogged.map(x => math.pow(x - scale, 2)).mean())
+    // We've logged transformed our data, so this is equivalent to testing for lognormal
+    val normDist = new NormalDistribution(scale, shape)
+    val testResult = Statistics.andersonDarlingTest(
       jittered,
-      (x: Double) => logNormDist.cumulativeProbability(x)
+      (x: Double) => normDist.cumulativeProbability(x)
     )
     testResult
   }

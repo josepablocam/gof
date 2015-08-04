@@ -15,14 +15,13 @@
 
 package com.cloudera.examples
 
-import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
+import org.apache.spark.SparkContext
 
-import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.mllib.regression.{LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.mllib.linalg.Vectors
-
+import org.apache.spark.mllib.regression.{LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.mllib.random.RandomRDDs.normalRDD
+import org.apache.spark.mllib.stat.Statistics
 import org.apache.spark.mllib.stat.test.KolmogorovSmirnovTestResult
 
 object KolmogorovSmirnovOLS {
@@ -74,8 +73,6 @@ object KolmogorovSmirnovOLS {
     val mean = residuals.mean()
     val variance = residuals.map(x => (x - mean) * (x - mean)).mean()
     val standardizedResiduals = residuals.map(x => (x - mean) / math.sqrt(variance))
-    // TODO: uncomment below once 2-sample included in MLlib
-    //Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
-    Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
+    Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
   }
 }
