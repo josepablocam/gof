@@ -32,7 +32,7 @@ object AndersonDarlingAirlineDelays {
   def main(args: Array[String]): Unit = {
     val sc = new SparkContext("local", "test")
     // Source: http://stat-computing.org/dataexpo/2009/the-data.html
-    val path = getClass().getClassLoader().getResource("2008.csv").getFile()
+    val path = getClass.getClassLoader.getResource("2008.csv").getFile
     val airLineRaw = sc.textFile(path)
     // wrap parser in Try to catch any exceptions, then get successes and extract
     val parsed = airLineRaw.map(x => Try(parseAirlineObs(x))).filter(_.isSuccess).map(_.get)
