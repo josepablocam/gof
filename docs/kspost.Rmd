@@ -11,7 +11,7 @@ highlight: pygments
 Data can come in many shapes and forms, and can be described in many ways.
 Statistics like the mean and standard deviation of a sample provide descriptions of some of its important qualities.  Less commonly used statistics such as [skewness](https://en.wikipedia.org/wiki/Skewness) and [kurtosis](https://en.wikipedia.org/wiki/Kurtosis) provide additional perspective into the data’s profile.  However, sometimes we can provide a much neater description
 for data by stating that a sample comes from a given distribution, which not only tells us things
-like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the Spark JIRAS: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov). In this post we’ll discuss the first two tests.
+like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the Spark JIRAS: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov). In this post we’ll discuss the first two tests, and take the 2-sample variant out for a spin on some simulated data.
 
 # Testing in big-data world
 The world of small-data analytics has many tools to accomplish this, ranging from quantitative measures to more graphical approaches. R, a popular statistical programming language, provides many of the usual measures out-of-the box, and there are a plethora of packages that provide additional goodness-of-fit tests and visualization tools to aid data scientists in determining whether a sample comes from a given distribution (or isn't different enough to warrant ruling that out). The same is true for Python, using libraries such as SciPy.
@@ -36,7 +36,7 @@ This might be one of the most popular goodness-of-fit tests for continuous data 
 The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
 $$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $Z$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
 
-The general intuition is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
+The general idea is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
 
 ```{r, echo=FALSE, smallplot}
 ### Demonstrating KS stat graphically
@@ -65,7 +65,7 @@ One of the main appeals of this test centers around the fact that the test is di
 ##Distilling distributed distribution (statistics) (now say that three times fast...)
 Calculating both of these statistics is extremely straightforward when performed in memory. If we have all our data, we can simply traverse it as needed and calculate what we need at each point. Performing the same calculations in a distributed setting can take a bit more craftiness.
 
-The remainder of this blog focuses on explaining the implementation details, along with an example, for the 2-sample Kolmogorov-Smirnov test. 
+The remainder of this blog focuses on explaining implementation details, along with an example, for the 2-sample Kolmogorov-Smirnov test. 
 
 ### Locals and Globals
 The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the graph below. We could keep track of the last seen maximum as we traverse the graph from left to right. But, if the graph were divided into parts, we could just as easily take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
@@ -254,6 +254,7 @@ Once we check the test results, we can see that the badly specified model has re
 
 Note that the test is meant for continuous distributions, so any ties in ranking will affect the test's power.
 
-To see the full code for this example, please visit [TODO:ADD LINK](link here).
+To see the full code for this example, please visit [this post’s github repo](https://github.com/josepablocam/gof).
 
-While in this blog post we have used the Scala API, all these tests have also been made available in PySpark (TODO: add missing to pyspark), allowing data scientists to calculate familiar statistics on big-data sized samples. As usual, all feedback is welcome. Happy hypothesis-testing!
+As usual, all feedback is welcome. Happy hypothesis-testing!
+
