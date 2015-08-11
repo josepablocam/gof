@@ -63,7 +63,7 @@ Spark makes it very easy to read text files, and directories. In this case, we'v
 
 ```scala
     // Source: http://stat-computing.org/dataexpo/2009/the-data.html
-    val path = getClass().getClassLoader().getResource("2008.csv").getFile()
+    val path = getClass.getClassLoader.getResource("2008.csv").getFile
     val airLineRaw = sc.textFile(path)
     // wrap parser in Try to catch any exceptions, then get successes and extract
     val parsed = airLineRaw.map(x => Try(parseAirlineObs(x))).filter(_.isSuccess).map(_.get)
@@ -97,27 +97,23 @@ The analysis will require that we frequently query `dataForTop` for each of the 
   dataForTop.cache()
 ```
 
-For each carrier, we extract all relevant delays. Note that given the precision that was reported for delay length (minutes) there will inevitably be ties. However, Anderson-Darling (and Kolmogorov-Smirnov) are both meant for continuous data and thus ties can result in poor results. Given this, we add a bit of noise to our numbers to avoid ties (ala R's `jitter`). The noise is uniformly distributed between 0 and 1 and we take 1/100 for each observation. We then produce MLE estimate for the scale and shape parameters for a Log-Normal distribution. Finally, we test our data against this distribution by using the Anderson-Darling 1-sample, 2-sided test.
+For each carrier, we extract all relevant delays. Note that given the precision that was reported for delay length (minutes) there will inevitably be ties. However, Anderson-Darling (and Kolmogorov-Smirnov) are both meant for continuous data and thus ties can result in poor results. Given this, we add a bit of noise to our numbers to avoid ties (ala R's `jitter`). The noise is uniformly distributed between 0 and 1 and we take 1/100 for each observation. We then produce MLE estimate for the location and scale parameters for a Normal distribution, as we have applied a log transformation to our original data. Note that performing the test on the log-transformed data and comparing to the Normal distribution is equivalent to comparing the original data to a Log-Normal distribution. Finally, we test our data against this distribution by using the Anderson-Darling 1-sample, 2-sided test.
 
 ```scala
   def testLogNormDist(
     data: RDD[AirlineObs],
     carrier: String,
-    rand: RandomGenerator): KolmogorovSmirnovTestResult = {
+    rand: RandomGenerator): AndersonDarlingTestResult = {
     val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
     val hasTies = delays.distinct().count < delays.count
     val jittered = if (hasTies) delays.map(_ + rand.nextDouble / 100) else delays
     val jitteredLogged = jittered.map(math.log)
     // MLE estimates
-    val scale = jitteredLogged.mean()
-    val shape = math.sqrt(jitteredLogged.map(x => math.pow(x - scale, 2)).mean())
-    // We've logged transformed our data, so this is equivalent to testing for lognormal
-    val normDist = new NormalDistribution(scale, shape)
-    val testResult = Statistics.andersonDarlingTest(
-      jittered,
-      (x: Double) => normDist.cumulativeProbability(x)
-    )
-    testResult
+    val location = jitteredLogged.mean()
+    val scale = jitteredLogged.stdev()
+    // We've logged transformed our data, so testing for normal here is equivalent
+    // to testing the original series for lognormal distribution
+    Statistics.andersonDarlingTest(jitteredLogged, "norm", location, scale)
   }
 ```
 

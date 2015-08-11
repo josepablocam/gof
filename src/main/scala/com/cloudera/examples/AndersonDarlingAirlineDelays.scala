@@ -20,7 +20,7 @@ import org.apache.commons.math3.random.{MersenneTwister, RandomGenerator}
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.mllib.stat.test.KolmogorovSmirnovTestResult
+import org.apache.spark.mllib.stat.test.AndersonDarlingTestResult
 import org.apache.spark.SparkContext
 
 import org.joda.time.{LocalDate, DateTime, LocalTime}
@@ -80,7 +80,7 @@ object AndersonDarlingAirlineDelays {
   def parseAirlineObs(line: String): AirlineObs = {
     val splitLine = line.split(",")
     val Array(year, month, day) = splitLine.take(3).map(_.toInt)
-    // pad in case error
+    // pad in case formatting error
     val (strHr, strMin) = ("00" + splitLine(5)).takeRight(4).splitAt(2)
     val timestamp = new DateTime(year, month, day, strHr.toInt, strMin.toInt)
     val carrier = splitLine(8)
@@ -118,20 +118,16 @@ object AndersonDarlingAirlineDelays {
   def testLogNormDist(
     data: RDD[AirlineObs],
     carrier: String,
-    rand: RandomGenerator): KolmogorovSmirnovTestResult = {
+    rand: RandomGenerator): AndersonDarlingTestResult = {
     val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
     val hasTies = delays.distinct().count < delays.count
     val jittered = if (hasTies) delays.map(_ + rand.nextDouble / 100) else delays
     val jitteredLogged = jittered.map(math.log)
     // MLE estimates
-    val scale = jitteredLogged.mean()
-    val shape = math.sqrt(jitteredLogged.map(x => math.pow(x - scale, 2)).mean())
-    // We've logged transformed our data, so this is equivalent to testing for lognormal
-    val normDist = new NormalDistribution(scale, shape)
-    val testResult = Statistics.andersonDarlingTest(
-      jittered,
-      (x: Double) => normDist.cumulativeProbability(x)
-    )
-    testResult
+    val location = jitteredLogged.mean()
+    val scale = jitteredLogged.stdev()
+    // We've logged transformed our data, so testing for normal here is equivalent
+    // to testing the original series for lognormal distribution
+    Statistics.andersonDarlingTest(jitteredLogged, "norm", location, scale)
   }
 }

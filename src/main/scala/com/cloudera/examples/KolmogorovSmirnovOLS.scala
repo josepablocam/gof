@@ -66,13 +66,12 @@ object KolmogorovSmirnovOLS {
   }
 
   // We'd like to compare our residuals against the standard normal distribution
-  // But we'd like to use the 2-sample Kolmogorov-Smirnov test, so we'll draw a sample
-  // from that distribution and compare
+  // we standardize our residuals first
   def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
     val stdNormSample = normalRDD(sc, residuals.count())
     val mean = residuals.mean()
     val variance = residuals.map(x => (x - mean) * (x - mean)).mean()
     val standardizedResiduals = residuals.map(x => (x - mean) / math.sqrt(variance))
-    Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
+    Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
   }
 }

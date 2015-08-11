@@ -231,16 +231,16 @@ Now all we need are our residuals. We can obtain these easily using the models' 
 
 ```
 
-In a small-data environment, one of the common ways to start testing the white-noise assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 2-sample Kolmogorov-Smirnov statistic. We could have naturally used the 1-sample Kolmogorov-Smirnov test, however, this is meant to provide a more general example of how we might use the 2-sample Kolmogorov-Smirnov test under circumstances where we might not have access to the theoretical cdf, but we do have access to a sample draw from the distribution. The function below performs this test for us.
+In a small-data environment, one of the common ways to start testing the white-noise assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 1-sample Kolmogorov-Smirnov statistic (note that the 2-sample version of the test is not yet available in Spark 1.5, and will likely be part of a later version). The function below performs this test for us.
 
 ```scala
+  // We'd like to compare our residuals against the standard normal distribution
+  // we standardize our residuals first
   def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
     val stdNormSample = normalRDD(sc, residuals.count())
     val mean = residuals.mean()
     val variance = residuals.map(x => (x - mean) * (x - mean)).mean()
     val standardizedResiduals = residuals.map(x => (x - mean) / math.sqrt(variance))
-    // TODO: uncomment below once 2-sample included in MLlib
-    //Statistics.kolmogorovSmirnovTest2(residuals, stdNormSample)
     Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
   }
 ```
