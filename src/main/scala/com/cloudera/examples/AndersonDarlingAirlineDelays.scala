@@ -30,7 +30,7 @@ import scala.util.{Try, Success, Failure}
 
 object AndersonDarlingAirlineDelays {
   def main(args: Array[String]): Unit = {
-    val sc = new SparkContext("local", "test")
+    val sc = new SparkContext("local", "ad")
     // Source: http://stat-computing.org/dataexpo/2009/the-data.html
     val path = getClass.getClassLoader.getResource("2008.csv").getFile
     val airLineRaw = sc.textFile(path)
