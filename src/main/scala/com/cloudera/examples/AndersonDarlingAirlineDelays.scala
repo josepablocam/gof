@@ -15,7 +15,6 @@
 
 package com.cloudera.examples
 
-import org.apache.commons.math3.distribution.NormalDistribution
 import org.apache.commons.math3.random.{MersenneTwister, RandomGenerator}
 
 import org.apache.spark.rdd.RDD
