@@ -54,8 +54,7 @@ qplot(x = dataSample, y = ecdf, geom = "line", color = "ECDF") +
   geom_line(aes(y = cdf, color = "CDF")) +
   geom_segment(aes(x = dataSample[maxIx], xend = dataSample[maxIx],
                    y = ecdf[maxIx], yend = cdf[maxIx],
-                   color = "distance"), linetype = "dashed"
-                   ) +
+                   color = "distance"), linetype = "dashed") +
   labs(y = "Cumulative Probability", x = "X", color = "")
   
 ```
@@ -66,7 +65,7 @@ One of the main appeals of this test centers around the fact that the test is di
 ##Distilling distributed distribution (statistics) (now say that three times fast...)
 Calculating both of these statistics is extremely straightforward when performed in memory. If we have all our data, we can simply traverse it as needed and calculate what we need at each point. Performing the same calculations in a distributed setting can take a bit more craftiness.
 
-The remainder of this blog focuses on explaining implementation details, along with an example, for the 1-sample Kolmogorov-Smirnov test. 
+The remainder of this blog focuses on explaining implementation details, along with an example for the 1-sample Kolmogorov-Smirnov test.
 
 ### Locals and Globals
 The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the dot plot below. We could keep track of the last seen maximum as we traverse the plot from left to right. But, if the plot were divided into parts, we could just as easily take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
@@ -93,7 +92,7 @@ qplot(adjx, y, geom = "point") + #main plot
 
 
 ###2-sample Kolmogorov-Smirnov test
-The 2-sample variant of the Kolmogorov-Smirnov (KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the total number of elements in that sample. This in effect is the CDF curve for $Z$ assuming we view sample 1 and sample 2 as some sort of "step-wise theoretical CDFs". We can then subtract these 2 values to compare the distance between the 2 CDFs at that given point.
+The 2-sample variant of the Kolmogorov-Smirnov (KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the total number of elements in that sample. This in effect provides with 2 empirical CDF curves for $Z$ assuming we view sample 1 and sample 2 as some sort of "step-wise CDFs". We can then subtract these 2 values to compare the distance between the 2 empirical CDFs at that given point.
 
 Implementing this for a single machine is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. In general, when conceiving distributed algorithms, the goal is to minimize the required communication between nodes.  In the context of Spark this usually means minimizing the number of operations that induce shuffles.  In this case, the algorithm must require at least a single shuffle - there is no getting around the fact that we must union and sort the data, but need we do more?
 
@@ -101,14 +100,15 @@ If we compute the empirical CDFs under each sample within a partition, the value
 
 ```{r, echo=FALSE, warning=FALSE}
 set.seed(1)
-data <- sort(rnorm(100))
+n <- 100
+data <- sort(rnorm(n))
 cdfVals <- sapply(data, pnorm)
-partBoundariesIx <- c(24, 45)
+partBoundariesIx <- c(24, 45) # just cause :)
 partBoundaries <- data[partBoundariesIx]
 localIx <- seq(partBoundariesIx[1], partBoundariesIx[2])
 xLocal <- data[localIx]
 yLocal <- cdfVals[localIx] - cdfVals[localIx][1] #shifted down by first
-ribbonCoords <- data.frame(x = rep(0, 100), ymin = rep(0, 100), ymax = rep(0, 100))
+ribbonCoords <- data.frame(x = rep(NA, n), ymin = rep(NA, n), ymax = rep(NA, n))
 ribbonCoords$x[localIx] <- xLocal
 ribbonCoords$ymin[localIx] <- yLocal
 ribbonCoords$ymax[localIx] <- cdfVals[localIx]
@@ -123,7 +123,7 @@ qplot(x = data, y = cdfVals) +
 
 This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the appropriate constant ($\alpha$ is really $\alpha_i$ for each partition $i$, similarly for $\beta$) once we’ve collected the values on the driver, and then compare the results for the maximum distance.
 
-So in the case of the 2 sample KS test we want each partition to compute 
+So in the case of the 2 sample KS test we want each partition to compute:
 
 - The maximum and minimum distance between the local empirical CDFs
 - The count of elements in sample 1

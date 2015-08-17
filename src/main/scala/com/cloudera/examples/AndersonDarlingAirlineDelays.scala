@@ -19,7 +19,7 @@ import org.apache.commons.math3.random.{MersenneTwister, RandomGenerator}
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.mllib.stat.test.AndersonDarlingTestResult
+import org.apache.spark.mllib.stat.test.KolmogorovSmirnovTestResult
 import org.apache.spark.SparkContext
 
 import org.joda.time.{LocalDate, DateTime, LocalTime}
@@ -117,7 +117,7 @@ object AndersonDarlingAirlineDelays {
   def testLogNormDist(
     data: RDD[AirlineObs],
     carrier: String,
-    rand: RandomGenerator): AndersonDarlingTestResult = {
+    rand: RandomGenerator): KolmogorovSmirnovTestResult = {
     val delays = data.filter(_.carrier == carrier).map(_.departureDelay.toDouble)
     val hasTies = delays.distinct().count < delays.count
     val jittered = if (hasTies) delays.map(_ + rand.nextDouble / 100) else delays
@@ -127,6 +127,6 @@ object AndersonDarlingAirlineDelays {
     val scale = jitteredLogged.stdev()
     // We've logged transformed our data, so testing for normal here is equivalent
     // to testing the original series for lognormal distribution
-    Statistics.andersonDarlingTest(jitteredLogged, "norm", location, scale)
+    Statistics.kolmogorovSmirnovTest(jitteredLogged, "norm", location, scale)
   }
 }

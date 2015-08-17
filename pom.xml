@@ -186,7 +186,7 @@
        <groupId>org.scala-lang</groupId>
        <artifactId>scala-library</artifactId>
        <version>${scala.complete.version}</version>
-       <scope>provided</scope>
+       <!--<scope>provided</scope>-->
     </dependency>
     <!-- Make sure this version is harmonized -->
     <dependency>
@@ -203,26 +203,26 @@
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-core_${scala.minor.version}</artifactId>
       <version>${spark.version}</version>
-      <scope>provided</scope>
+      <!--<scope>provided</scope> -->
     </dependency>
     <dependency>
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-sql_${scala.minor.version}</artifactId>
       <version>${spark.version}</version>
-      <scope>provided</scope>
-   </dependency>
+	<!--<scope>provided</scope> --> 	   
+</dependency>
    <dependency>
      <groupId>org.apache.spark</groupId>
      <artifactId>spark-catalyst_${scala.minor.version}</artifactId>
      <version>${spark.version}</version>
-     <scope>provided</scope>
-   </dependency>
+	<!--<scope>provided</scope> -->    
+</dependency>
    <dependency>
      <groupId>org.apache.spark</groupId>
      <artifactId>spark-mllib_${scala.minor.version}</artifactId>
      <version>${spark.version}</version>
-     <scope>provided</scope>
-   </dependency>
+	<!--<scope>provided</scope> -->    
+</dependency>
    <dependency>
      <groupId>com.github.nscala-time</groupId>
      <artifactId>nscala-time_2.10</artifactId>
