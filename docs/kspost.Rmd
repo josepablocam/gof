@@ -39,7 +39,7 @@ $$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ whe
 
 The general idea is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
 
-```{r, echo=FALSE, smallplot}
+```{r ks_distance, echo=FALSE}
 ### Demonstrating KS stat graphically
 library(ggplot2)
 n <- 100
@@ -70,7 +70,7 @@ The remainder of this blog focuses on explaining implementation details, along w
 ### Locals and Globals
 The general intuition behind the strategy applied to solve these problems is: we can often arrive at a global value by working with local values. For example, consider the problem of finding the global maximum in the dot plot below. We could keep track of the last seen maximum as we traverse the plot from left to right. But, if the plot were divided into parts, we could just as easily take the maximum of each part (local maximum, and potentially the global maximum) and then compare at the end and pick the winner. 
 
-```{r, echo=FALSE}
+```{r local_vs_global, echo=FALSE, external=TRUE}
 set.seed(1)
 x <- seq(100)
 y <- rnorm(100) + rnorm(100)*rbinom(100, 1, 0.3) #add spikes to N(0,1) with prob 0.3
@@ -98,7 +98,7 @@ Implementing this for a single machine is very easy. The paragraph above effecti
 
 If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of 1 sample. The 2-sample case is analogous.
 
-```{r, echo=FALSE, warning=FALSE}
+```{r shifted_cdf, echo=FALSE, warning=FALSE, external=TRUE}
 set.seed(1)
 n <- 100
 data <- sort(rnorm(n))
@@ -132,7 +132,7 @@ So in the case of the 2 sample KS test we want each partition to compute:
 We actually combine the last 2 points into 1 adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
 
 
-  ```{tikz, echo=FALSE, dev='pdf', fig.path='figure/', fig.width=6, fig.height=6}
+  ```{tikz ks_implementation_diagram, echo=FALSE, dev='pdf', fig.path='figure/', fig.width=6, fig.height=6}
 \def\layersep{2.5cm}
 \usetikzlibrary{fit}
 \begin{tikzpicture}[shorten >=1pt,->,draw=black!50, node distance=\layersep, scale=1.5]
