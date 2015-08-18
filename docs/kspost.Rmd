@@ -12,7 +12,7 @@ header-includes:
 Data can come in many shapes and forms, and can be described in many ways.
 Statistics like the mean and standard deviation of a sample provide descriptions of some of its important qualities.  Less commonly used statistics such as [skewness](https://en.wikipedia.org/wiki/Skewness) and [kurtosis](https://en.wikipedia.org/wiki/Kurtosis) provide additional perspective into the data’s profile.  However, sometimes we can provide a much neater description
 for data by stating that a sample comes from a given distribution, which not only tells us things
-like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the Spark JIRAS: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov). In this post we’ll discuss the first two tests, and take the 1-sample variant out for a spin on some simulated data.
+like the average value that we should expect, but effectively gives us the data's "recipe" so that we can compute all sorts of useful information from it. As part of my summer internship at Cloudera I’ve added implementations to Apache Spark’s MLlib library of various statistical tests that can help us draw conclusions regarding how well a distribution fits data. Specifically, the implementations pertain to the Spark JIRAs: [1-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8598?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), [2-sample, two-sided Kolmogorov-Smirnov test](https://issues.apache.org/jira/browse/SPARK-8674?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov), and [1-sample, two-sided Anderson-Darling test](https://issues.apache.org/jira/browse/SPARK-8884?jql=project%20%3D%20SPARK%20AND%20text%20~%20kolmogorov). In this post we’ll discuss the first two tests, and take the 1-sample variant out for a spin on some simulated data.
 
 # Testing in big-data world
 The world of small-data analytics has many tools to accomplish this, ranging from quantitative measures to more graphical approaches. R, a popular statistical programming language, provides many of the usual measures out-of-the box, and there are a plethora of packages that provide additional goodness-of-fit tests and visualization tools to aid data scientists in determining whether a sample comes from a given distribution (or isn't different enough to warrant ruling that out). The same is true for Python, using libraries such as SciPy.
@@ -26,18 +26,18 @@ As useful and powerful as the Chi-Squared test is with discrete data, applying i
 #Innocent until proven guilty (read: null until proven alternate!)
 We might have various distributions that we think fit our data. We now have the task of testing whether our empirical data actually follow these theoretical distributions.
 
-It is often difficult to conclude that a given hypothesis is correct. However, the converse, concluding that a given hypothesis is wrong, can be simpler. This idea might initially seem a bit counterintuitive, but a simple example can clear things up. Let's say a bad back is a common (clearly not professional!) diagnosis for back pain. If I have back pain, it is possible that I might have a bad back. It is also possible that I simply sat for too long. However, if I don't have back pain, it is fairly certain that I don't have a bad back. This drives the underlying intuition behind the concept of a null hypothesis and statistical tests for that hypothesis.
+It is often difficult to conclude that a given hypothesis is correct. However, the converse, concluding that a given hypothesis is wrong, can be simpler. This idea might initially seem a bit counterintuitive, but a simple example can clear things up. Let's say a bad back is a common (clearly not professional!) diagnosis for back pain. If I have back pain, it is possible that I might have a bad back. It is also possible that I simply sat for too long. However, if I don't have back pain, it is fairly certain that I don't have a bad back. This drives the underlying intuition behind the concept of a null hypothesis and statistical tests for that hypothesis. In our example, “having a bad back” is our null hypothesis: what we assume until we can prove otherwise, while an analysis of our level of back pain can be seen as a our statistical test.
 
-We can use this approach to do something similar with our potential distributions. We'll discuss 2 such standard statistical tests in this and a following blog post: the Kolmogorov-Smirnov test, and the Anderson-Darling test. While "passing" the test doesn't guarantee that the data comes from that distribution, failing can demonstrate that it does not.
+We can use this approach to do something similar with our potential distributions. We'll discuss one such standard statistical test in this blog post: the Kolmogorov-Smirnov test. While "passing" the test doesn't guarantee that the data comes from that distribution, failing can demonstrate that it does not.
 
 #Statistics: Goodness-of-Fit tests
 ##Kolmogorov-Smirnov
-This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The procedure behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function).
+This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The procedure behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function). Empirical cumulative distribution is simply fancy terminology for the realized distribution from our data. Meanwhile, we should view the theoretical cumulative distribution as what we would expect, given that the data follows said distribution.
 
 The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
 $$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $Z$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
 
-The general idea is captured by the graphic below. The test tries to capture the largest difference between the 2 curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
+The general idea is captured by the graphic below. The test tries to capture the largest difference between the two curves. Then, given the distribution of the statistic itself, we can make some claims regarding how likely such a distance would be assuming that the null hypothesis (i.e. that the data comes from the distribution) holds. 
 
 ```{r ks_distance, echo=FALSE}
 ### Demonstrating KS stat graphically
@@ -59,7 +59,7 @@ qplot(x = dataSample, y = ecdf, geom = "line", color = "ECDF") +
   
 ```
 
-One of the main appeals of this test centers around the fact that the test is distribution-agnostic. By that we mean that the statistic can be calculated and compared the same way regardless of the theoretical distribution we are interested in comparing against (or the actual distributions of the 1 or 2 samples, depending on the test variant being performed).
+One of the main appeals of this test centers around the fact that the test is distribution-agnostic. By that we mean that the statistic can be calculated and compared the same way regardless of the theoretical distribution we are interested in comparing against (or the actual distributions of the one or two samples, depending on the test variant being performed).
 
 #Implementations
 ##Distilling distributed distribution (statistics) (now say that three times fast...)
@@ -92,11 +92,11 @@ qplot(adjx, y, geom = "point") + #main plot
 
 
 ###2-sample Kolmogorov-Smirnov test
-The 2-sample variant of the Kolmogorov-Smirnov (KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the 2 empirical CDF curves. The process for generating the 2 curves is quite simple. You create a co-sorted group $Z$, and then for each element $Z_i$ you calculate 2 values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the total number of elements in that sample. This in effect provides with 2 empirical CDF curves for $Z$ assuming we view sample 1 and sample 2 as some sort of "step-wise CDFs". We can then subtract these 2 values to compare the distance between the 2 empirical CDFs at that given point.
+The 2-sample variant of the Kolmogorov-Smirnov (KS) test allows us to test the hypothesis that both samples stem from the same distribution. Its definition is a nice, straightforward extension of the 1-sample variant: we are looking for the largest distance between the two empirical CDF curves. The process for generating the two curves is quite simple. We create a co-sorted group $Z$, and then for each element $Z_i$ we calculate two values, $y_{i1}$ and $y_{i2}$, which are simply the number of elements in each respective sample with a value less than or equal to $Z_i$, divided by the total number of elements in that sample. This in effect provides us with two empirical CDF curves for $Z$ assuming we view sample 1 and sample 2 as some sort of "step-wise CDFs". We can then subtract these two values to compare the distance between the two empirical CDFs at that given point.
 
 Implementing this for a single machine is very easy. The paragraph above effectively gives you the steps. But now let's think about calculating this in a distributed fashion. In general, when conceiving distributed algorithms, the goal is to minimize the required communication between nodes.  In the context of Spark this usually means minimizing the number of operations that induce shuffles.  In this case, the algorithm must require at least a single shuffle - there is no getting around the fact that we must union and sort the data, but need we do more?
 
-If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of 1 sample. The 2-sample case is analogous.
+If we compute the empirical CDFs under each sample within a partition, the values for sample 1 will be off by $\alpha$ and the values for sample 2 will be off by $\beta$. However, note that all values for each sample within that partition will be off by that same amount. Since both are off by constants, the vertical distance between them is also off by a constant ($\alpha-\beta$). The graph below shows this idea for the case of one sample. The two sample case is analogous.
 
 ```{r shifted_cdf, echo=FALSE, warning=FALSE, external=TRUE}
 set.seed(1)
@@ -123,13 +123,13 @@ qplot(x = data, y = cdfVals) +
 
 This fact allows us to simply concentrate on finding the largest deviation within each partition, adjusting these later by the appropriate constant ($\alpha$ is really $\alpha_i$ for each partition $i$, similarly for $\beta$) once we’ve collected the values on the driver, and then compare the results for the maximum distance.
 
-So in the case of the 2 sample KS test we want each partition to compute:
+So in the case of the two sample KS test we want each partition to compute:
 
 - The maximum and minimum distance between the local empirical CDFs
 - The count of elements in sample 1
 - The count of elements in sample 2
 
-We actually combine the last 2 points into 1 adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
+We actually combine the last two points into one adjustment constant, to minimize the number of elements we need to keep track of. The diagram below visualizes the steps described prior.
 
 
   ```{tikz ks_implementation_diagram, echo=FALSE, dev='pdf', fig.path='figure/', fig.width=6, fig.height=6}
@@ -186,32 +186,32 @@ We actually combine the last 2 points into 1 adjustment constant, to minimize th
 ```
 
 ####Running our test’s implementation on simulated OLS residuals
-In this case, we've decided to simulate data, from which we then create 2 very simplistic linear regression models using ordinary least squares (OLS).
+In this case, we've decided to simulate data, from which we then create two very simplistic linear regression models using ordinary least squares (OLS).
 
 If you recall from your statistics classes, OLS imposes various assumptions on the data that you're trying to model and on the resulting model. To the extent that the assumptions don't hold, you can end up with poor results, and in some cases you might not even know they're necessarily poor. One of those restrictions is that the residuals (which are defined as the observed value minus the predicted value) should be *white noise*, which means they follow a normal distribution, are uncorrelated, and have constant variance. Under some circumstances, you can keep your OLS model, even if not all boxes are checked off, but in this case we'll assume we're being sticklers.
 
-We'll begin by generating our data: 2 regressors, which are combined to create a dependent variable. We can very easily generate a distributed sample from a normal distribution by using Spark's `RandomRDD`, which is part of `MLlib`.
+We'll begin by generating our data: two regressors, which are combined to create a dependent variable. We can very easily generate a distributed sample from a normal distribution by using Spark's `RandomRDD`, which is part of `MLlib`.
 
 ```scala
-    val n = 1e6.toLong
+    val n = 1000000
     val x1 = normalRDD(sc, n, seed = 10L)
     val x2 = normalRDD(sc, n, seed = 5L)
     val X = x1.zip(x2)
-    val y = X.map(x => 2.5 + 3.4 * x._1 + 1.5 * x._2)
+    val y = X.map { case (xi1, xi2) => 2.5 + 3.4 * xi1 + 1.5 * xi2 }
     val data = y.zip(X).map { case (yi, (xi1, xi2)) => (yi, xi1, xi2) }
 ```
 Once we've defined our data, we specify 2 models. One which is clearly wrong. In turn, this means that the residuals for the incorrect model should not satisfy the white noise assumption.
 ```scala
   // This model specification captures all the regressors that underly
   // the true process
-  def goodSpec(obs: (Double, Double, Double)): LabeledPoint = {
+  def goodSpec(obs: (Double, Double, Double)) = {
     val X = Array(1.0, obs._2, obs._3)
     val y = obs._1
-    LabeledPoint(y, Vectors.dense(X)) //
+    LabeledPoint(y, Vectors.dense(X))
   }
 
   // this is a bad model
-  def badSpec(obs: (Double, Double, Double)): LabeledPoint = {
+  def badSpec(obs: (Double, Double, Double)) = {
     val X  = Array(1.0, obs._2, obs._2 * obs._1)
     val y = obs._1
     LabeledPoint(y, Vectors.dense(X))
@@ -220,31 +220,30 @@ Once we've defined our data, we specify 2 models. One which is clearly wrong. In
 We specified the models as simple functions, since we can then map over the observations RDD and obtain an `RDD[LabeledPoint]`, which is exactly what MLlib's [linear regression implementation](http://spark.apache.org/docs/latest/mllib-linear-methods.html#linear-least-squares-lasso-and-ridge-regression) expects.
 
 ```scala
-    val iters = 100
+    val iterations = 100
     val goodModelData = data.map(goodSpec)
-    val goodModel = LinearRegressionWithSGD.train(goodModelData, iters)
+    val goodModel = LinearRegressionWithSGD.train(goodModelData, iterations)
 
     val badModelData = data.map(badSpec)
-    val badModel = LinearRegressionWithSGD.train(badModelData, iters)
+    val badModel = LinearRegressionWithSGD.train(badModelData, iterations)
 ```
 
 Now all we need are our residuals. We can obtain these easily using the models' `predict` function.
 
 ```scala
-    val goodResiduals = goodModelData.map(p => p.label -  goodModel.predict(p.features))
+    val goodResiduals = goodModelData.map(p => p.label - goodModel.predict(p.features))
     val badResiduals = badModelData.map(p => p.label - badModel.predict(p.features))
-
 ```
 
 In a small-data environment, one of the common ways to start testing the white-noise assumption is to perform various plots of the residuals and see if there are any glaring departures from normality. However, in a big-data world, such tools might not be feasible or necessarily all that useful. We can, however, leverage other measures, such as the 1-sample Kolmogorov-Smirnov statistic (note that the 2-sample version of the test is not yet available in Spark 1.5, and will likely be part of a later version). The function below performs this test for us.
 
+We would like to compare our residuals against the standard normal distribution. To this end, we standardized our residuals first. Alternatively, note that we could have tested the original residuals and simply have provided the distribution parameters (mean and standard deviation) as parameters to our function call.
+
 ```scala
-  // We'd like to compare our residuals against the standard normal distribution
-  // we standardize our residuals first. Alternatively, we could have tested the
-  // original residuals and provided mean and sd as parameters to the test call
   def testResiduals(residuals: RDD[Double]): KolmogorovSmirnovTestResult = {
     val mean = residuals.mean()
     val sd = residuals.stdev()
+    // standardize using distribution parameters before testing
     val standardizedResiduals = residuals.map(x => (x - mean) / sd)
     Statistics.kolmogorovSmirnovTest(standardizedResiduals, "norm")
   }
