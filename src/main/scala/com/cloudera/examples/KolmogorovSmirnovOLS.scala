@@ -59,7 +59,7 @@ object KolmogorovSmirnovOLS {
   }
 
   def badSpec(obs: (Double, Double, Double)) = {
-    val X  = Array(1.0, obs._2, obs._2 * obs._1)
+    val X  = Array(1.0, obs._2, obs._2 * obs._3, obs._3)
     val y = obs._1
     LabeledPoint(y, Vectors.dense(X))
   }

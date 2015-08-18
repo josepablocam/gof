@@ -32,7 +32,7 @@ We can use this approach to do something similar with our potential distribution
 
 #Statistics: Goodness-of-Fit tests
 ##Kolmogorov-Smirnov
-This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The procedure behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function). Empirical cumulative distribution is simply fancy terminology for the realized distribution from our data. Meanwhile, we should view the theoretical cumulative distribution as what we would expect, given that the data follows said distribution.
+This might be one of the most popular goodness-of-fit tests for continuous data out there, with an implementation in pretty much every popular analytics platform. The procedure behind the test centers around comparing the largest deviation between the cumulative distribution at a given value X under the theoretical distribution and the [empirical cumulative distribution](https://en.wikipedia.org/wiki/Empirical_distribution_function). Empirical cumulative distribution is simply fancy terminology for the realized distribution of our data. Meanwhile, we should view the theoretical cumulative distribution as what we would expect, if our data followed said distribution.
 
 The Kolmogorov-Smirnov statistic for the 1-sample, 2-sided statistic is defined as 
 $$D = \max_{i=1}^n (\Phi(Z_i) - \frac{i - 1}{n}, \frac{i}{N} - \Phi(Z_i)) $$ where $N$ is the size of the sample, $Z$ is the sorted sample, and $\Phi$ represents the cumulative distribution function for the theoretical distribution that we want to test.
@@ -212,7 +212,7 @@ Once we've defined our data, we specify 2 models. One which is clearly wrong. In
 
   // this is a bad model
   def badSpec(obs: (Double, Double, Double)) = {
-    val X  = Array(1.0, obs._2, obs._2 * obs._1)
+    val X  = Array(1.0, obs._2, obs._2 * obs._3, obs._3)
     val y = obs._1
     LabeledPoint(y, Vectors.dense(X))
   }
